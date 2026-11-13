@@ -50,38 +50,20 @@ static int profiler_test_handle_count(void) {
 #define profiler_fiber_destroy profiler_test_counted_destroy
 #endif
 #include <main/SAPI.h>
-static int automatic_fault;
-static void automatic_test_log(const char *message) {
-    if (automatic_fault == 1)
-        zend_bailout();
-    php_log_err(message);
-}
-static int automatic_test_header(sapi_header_op_enum op, void *argument) {
-    if (automatic_fault == 2)
-        zend_bailout();
-    if (automatic_fault == 3)
-        return FAILURE;
-    return sapi_header_op(op, argument);
-}
-static bool automatic_test_global(const char *name, size_t length) {
-    if (automatic_fault == 4)
-        zend_bailout();
-    return zend_is_auto_global_str(name, length);
-}
-static int automatic_test_register(const zend_ini_entry_def *entries, int number) {
-    const char *mode = getenv("PROFILER_TEST_BAILOUT");
-    if (mode && !strcmp(mode, "ini-register")) {
-        (void)write(2, "INJECTED_INI_REGISTER_FAILURE\n",
-                    sizeof("INJECTED_INI_REGISTER_FAILURE\n") - 1);
-        return FAILURE;
-    }
-    return zend_register_ini_entries(entries, number);
-}
+#include <sys/mman.h>
+ZEND_TLS int automatic_fault;
+int automatic_test_fault(void) { return automatic_fault; }
+void automatic_test_log(const char *message);
+int automatic_test_header(sapi_header_op_enum op, void *argument);
+bool automatic_test_global(const char *name, size_t length);
+int automatic_test_register(const zend_ini_entry_def *entries, int number);
 #undef php_log_err
 #define php_log_err automatic_test_log
+#ifndef __linux__
 #define sapi_header_op automatic_test_header
 #define zend_is_auto_global_str automatic_test_global
 #define zend_register_ini_entries automatic_test_register
+#endif
 #include "../../crates/php-profiler/src/bridge.c"
 #undef php_log_err
 #undef sapi_header_op
@@ -416,6 +398,16 @@ static char *automatic_test_getenv(const char *name, size_t length) {
 }
 static PHP_FUNCTION(profiler_test_automatic_transports) {
     (void)execute_data;
+    zend_module_entry *module = zend_hash_str_find_ptr(&module_registry, ZEND_STRL("php_profiler"));
+    AUTOMATIC_ASSERT(module != NULL);
+    int previous_type = module->type;
+    module->type = MODULE_TEMPORARY;
+    profiler_config_unregister(module->module_number);
+    size_t ini_length = 0;
+    AUTOMATIC_ASSERT(profiler_ini((const unsigned char *)"php_profiler.mode",
+                                  sizeof("php_profiler.mode") - 1, &ini_length) == NULL);
+    AUTOMATIC_ASSERT(profiler_config_register(module->module_number) == SUCCESS);
+    module->type = previous_type;
     char *original_name = sapi_module.name;
     char *(*original_getenv)(const char *, size_t) = sapi_module.getenv;
     profiler_thread_flags original_flags = profiler_flags;
@@ -429,6 +421,20 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 4097) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secrex", 6) == 0);
+    char maximum[4097];
+    memset(maximum, 'x', 4096);
+    maximum[4096] = 0;
+    automatic_test_value = maximum;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)maximum, 4096) == 1);
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    unsigned char *guarded =
+        mmap(NULL, page * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    AUTOMATIC_ASSERT(guarded != MAP_FAILED);
+    AUTOMATIC_ASSERT(mprotect(guarded + page, page, PROT_NONE) == 0);
+    memcpy(guarded + page - 6, "secret", 6);
+    automatic_test_value = "secret";
+    AUTOMATIC_ASSERT(profiler_trigger_matches(guarded + page - 6, 6) == 1);
+    AUTOMATIC_ASSERT(munmap(guarded, page * 2) == 0);
     automatic_test_value = NULL;
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
     automatic_test_value = "short";
@@ -450,6 +456,8 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER",
                      oversized);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", maximum);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)maximum, 4096) == 1);
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
     automatic_fault = 4;

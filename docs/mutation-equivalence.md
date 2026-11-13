@@ -93,8 +93,9 @@ The bridge sites have separate proofs:
   emitted stores and supported logical consumers use the same bit-0 normalization.
   The NTS context was reviewed independently after the corrected full run.
 
-No supported consumer copies or compares the raw flag object, exposes its address,
-or binds its byte layout in Rust. Actual original and mutant ELF disassemblies,
+No supported consumer compares the raw flag object or binds its byte layout in
+Rust. The private automatic transport guard saves/restores the structure without
+inspecting its raw representation; see the HTTP-control renewal below. Actual original and mutant ELF disassemblies,
 source-reader enumeration, private guard readers and dynamic-symbol checks are
 retained with hashes. These scoped proofs do not classify neighboring sites or
 true-to-42 mutations, and do not reclassify any raw killed outcome.
@@ -350,3 +351,58 @@ bytes preceding that module are identical. The native C source, machine readers,
 source spans, contexts and classifications are unchanged. Independent review
 approved refreshing only this core source's dependency hash and this explanatory
 proof document; it does not relabel the earlier timeout or approve future edits.
+
+## HTTP request controls: consumer audit renewal
+
+The HTTP-control change appends code after the historically audited 11,832-byte
+`bridge.c` prefix (SHA-256
+`42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41`).
+That prefix and all existing mutation coordinates are byte-identical; the sampler
+source, allocator, clocks, flag publications and resolver are unchanged.
+
+The new Rust lifecycle code starts captures through existing admission routines,
+freezes sessions before persistence, and consumes bridge flags through the existing
+typed FFI getters. It does not expose or inspect their byte representation.
+The private automatic transport test saves/restores the native flag structure;
+its Boolean assertions use typed field reads, not raw-byte comparisons. Reviewed
+Clang 19 NTS and ZTS disassemblies retain bit-0 normalization at these readers.
+This qualifies the previous statement about raw-object consumers: preserving a
+structure for restoration is now present, but observing/comparing its raw Boolean
+representation remains absent. The original noncanonical-byte proofs still apply
+only to the pinned actual compiler/consumer closure.
+
+Three new Linux link wrappers intercept INI registration, auto-global
+materialization and SAPI header submission. They inject failures only in private
+contracts and otherwise delegate to the original APIs. They do not change the
+old prefix's flag/allocator/resolver consumers or sampler ownership, period,
+truncation and service-clock invariants. Ordinary production call expressions
+remain intact, and the ordinary/private mutation inventory must match exactly.
+The contexts add these three fixture symbols; compiler, plugin, libc, flags,
+ABI and the two recorded runtime compilation commands remain pinned.
+
+The renewed dependency closure includes the automatic adapter, private dependency
+transports and their contracts. Historical reports retain their original source
+snapshots and raw statuses. Renewal grants no classification to additional
+mutations unless their exact span, replacement and proof appear in the ledger.
+
+### Automatic server materialization nonzero success
+
+The exact `cxx_assign_const` mutation at `bridge.c` 318:17–18 replaces the
+successful local integer assignment `1` with `42`. It retains the original
+`zend_is_auto_global_str` call, its side effects, the initial zero, the bailout
+catch/deferred-failure publication, and restoration of Zend's bailout pointer.
+The local address does not escape. The static helper has one supported caller,
+which tests only logical zero/nonzero before inspecting the materialized server
+array. Neither the raw success integer nor its representation reaches PHP/Rust
+or a report. Thus 1 and 42 permit the same lookup; failures still return zero.
+This proof covers only this successful assignment, not the initializer, API call,
+header result or token comparison.
+
+Actual ordinary NTS/ZTS Mull objects from PR #13's initial CI inventory contain
+the integer `movl $0x2a` mutant store, an integer return, and a caller comparison
+against zero. The exact objects are retained in that run's `c-mutation-nts` and
+`c-mutation-ts` artifacts. Updated private NTS/ZTS objects were independently
+reviewed for the typed flag readers and the unchanged status consumer. This is
+an integer truthiness proof, not an additional noncanonical Boolean exception.
+Raw Killed/Survived results remain collector outputs; the strict classifier
+subtracts this entry only when this exact candidate is reported Survived.

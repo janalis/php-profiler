@@ -116,10 +116,15 @@ fn main() {
         // Isolated native-test translation unit: never enabled in release builds.
         println!("cargo:rerun-if-changed=../../tests/native/bridge-unit.c");
         build.file("../../tests/native/bridge-unit.c");
+        println!("cargo:rerun-if-changed=../../tests/native/automatic-transports.c");
+        build.file("../../tests/native/automatic-transports.c");
         build.define("PROFILER_GUARD_UNIT_PRESENT", None);
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
             println!("cargo:rustc-link-arg=-Wl,--wrap=profiler_fiber_cleanup");
             println!("cargo:rustc-link-arg=-Wl,--wrap=profiler_fiber_destroy");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=sapi_header_op");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=zend_is_auto_global_str");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=zend_register_ini_entries");
         }
     } else {
         build.file("src/bridge.c");

@@ -7,20 +7,39 @@ import tempfile
 import sys
 import concurrent.futures
 from fpm_support import FpmServer
+from sanitizer_diagnostics import reject_sanitizer_diagnostics
+
+php_environment = os.environ.copy()
+if php_environment.get('PROFILER_ASAN_RUNTIME'):
+    preload = 'DYLD_INSERT_LIBRARIES' if sys.platform == 'darwin' else 'LD_PRELOAD'
+    php_environment[preload] = php_environment['PROFILER_ASAN_RUNTIME']
+
+
+def run_php(*args, **kwargs):
+    kwargs.setdefault('env', php_environment)
+    try:
+        result = subprocess.run(*args, **kwargs)
+    except subprocess.CalledProcessError as failure:
+        diagnostics = (failure.stdout or b'') + (failure.stderr or b'')
+        raise RuntimeError('PHP subprocess failed: ' + diagnostics.decode(errors='replace')) from failure
+    diagnostics = (result.stdout or b'') + (result.stderr or b'')
+    reject_sanitizer_diagnostics(diagnostics.decode(errors='replace'), 'automatic PHP subprocess')
+    return result
+
 
 extension = os.environ['PROFILER_EXTENSION']
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory)
     command = ['php', '-n', '-d', 'extension=' + extension, '-d', 'php_profiler.mode=always',
                '-d', 'php_profiler.output_dir=' + directory, '-r', 'function leaf() {} leaf(); echo "ok";']
-    started = subprocess.run(command, capture_output=True, check=True)
+    started = run_php(command, capture_output=True, check=True)
     assert started.stdout == b'ok' and not started.stderr, started
     disabled = ['php', '-n', '-d', 'extension=' + extension, '-r',
                 'if (ini_set("php_profiler.mode", "always") !== false) exit(1); echo "ok";']
-    assert subprocess.check_output(disabled) == b'ok'
+    assert run_php(disabled, capture_output=True, check=True).stdout == b'ok'
     invalid = command.copy()
     invalid[invalid.index('php_profiler.output_dir=' + directory)] = 'php_profiler.output_dir=' + directory + '/missing'
-    failed = subprocess.run(invalid, capture_output=True, check=True)
+    failed = run_php(invalid, capture_output=True, check=True)
     assert failed.stdout == b'ok'
     assert b'automatic capture failed' in failed.stderr
     files = list(output.glob('*.json'))
@@ -119,7 +138,7 @@ with tempfile.TemporaryDirectory() as directory:
         ('echo "early"; flush();', 1, 'request_complete'),
         ('throw new Exception("fatal test");', 1, 'request_complete'),
     ]:
-        result = subprocess.run(base + ['-r', source], capture_output=True)
+        result = run_php(base + ['-r', source], capture_output=True)
         assert result.returncode == (255 if source.startswith('throw') else 0), result
         reports = list(output.glob('*.json'))
         assert len(reports) == count, (source, reports)
@@ -132,23 +151,23 @@ with tempfile.TemporaryDirectory() as directory:
     os.mkdir(output / 'relative-directory')
     for name, value in [('mode', 'invalid'), ('max_events', '0'), ('max_events', '8193'),
                         ('timeline', 'invalid'), ('sampling', 'invalid'), ('output_dir', 'relative'), ('output_dir', directory + '/missing')]:
-        result = subprocess.run(base + ['-d', f'php_profiler.{name}={value}', '-r', 'echo "ok";'], capture_output=True)
+        result = run_php(base + ['-d', f'php_profiler.{name}={value}', '-r', 'echo "ok";'], capture_output=True)
         assert result.returncode == 0 and result.stdout == b'ok', result
         assert b'automatic capture failed' in result.stderr, result
         assert not list(output.glob('*.json'))
-    relative = subprocess.run(base + ['-d', 'php_profiler.output_dir=relative-directory', '-r', 'echo "ok";'], cwd=directory, capture_output=True, check=True)
+    relative = run_php(base + ['-d', 'php_profiler.output_dir=relative-directory', '-r', 'echo "ok";'], cwd=directory, capture_output=True, check=True)
     assert relative.stdout == b'ok' and b'automatic capture failed' in relative.stderr
     assert not list((output / 'relative-directory').glob('*.json'))
-    result = subprocess.run(base + ['-d', 'open_basedir=/nonexistent-profiler-test', '-r', 'echo "ok";'], capture_output=True, check=True)
+    result = run_php(base + ['-d', 'open_basedir=/nonexistent-profiler-test', '-r', 'echo "ok";'], capture_output=True, check=True)
     assert result.stdout == b'ok' and b'automatic capture failed' in result.stderr
     assert not list(output.glob('*.json'))
-    result = subprocess.run(base + ['-d', 'php_profiler.timeline=1' , '-d', 'php_profiler.max_events=1',
+    result = run_php(base + ['-d', 'php_profiler.timeline=1' , '-d', 'php_profiler.max_events=1',
                                   '-r', 'function a() {} a();'], capture_output=True, check=True)
     report = json.loads(next(output.glob('*.json')).read_text())
     assert report['timeline'], report
     for path in output.glob('*.json'):
         path.unlink()
-    result = subprocess.run(base + ['-d', 'php_profiler.sampling=1', '-r', 'usleep(20000);'], capture_output=True, check=True)
+    result = run_php(base + ['-d', 'php_profiler.sampling=1', '-r', 'usleep(20000);'], capture_output=True, check=True)
     sampled = list(output.glob('*.json'))
     if os.environ.get('CI_PROFILER_REQUIRE_SAMPLING') == '1':
         assert sampled, result
@@ -159,7 +178,7 @@ with tempfile.TemporaryDirectory() as directory:
     for path in sampled:
         path.unlink()
     # Tightening open_basedir while recording must prevent persistence.
-    result = subprocess.run(base + ['-r', 'ini_set("open_basedir", "/nonexistent-profiler-test"); echo "ok";'], capture_output=True, check=True)
+    result = run_php(base + ['-r', 'ini_set("open_basedir", "/nonexistent-profiler-test"); echo "ok";'], capture_output=True, check=True)
     assert result.stdout == b'ok' and b'automatic capture failed' in result.stderr
     assert not list(output.glob('*.json'))
 print('automatic lifecycle, configuration, options and persistence failure checks passed')
@@ -178,7 +197,7 @@ with tempfile.TemporaryDirectory(prefix='profiler-http-') as directory:
     arguments = ['php', '-n', '-d', 'extension=' + extension, '-d', 'php_profiler.mode=trigger',
                  '-d', 'php_profiler.trigger_secret=http-secret', '-d', 'php_profiler.output_dir=' + directory,
                  '-S', f'127.0.0.1:{port}', '-t', directory]
-    with subprocess.Popen(arguments, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as server:
+    with tempfile.TemporaryFile() as server_errors, subprocess.Popen(arguments, stdout=subprocess.DEVNULL, stderr=server_errors, env=php_environment) as server:
         try:
             address = f'http://127.0.0.1:{port}/'
             for attempt in range(100):
@@ -208,6 +227,8 @@ with tempfile.TemporaryDirectory(prefix='profiler-http-') as directory:
         finally:
             server.send_signal(signal.SIGINT)
             server.wait(timeout=10)
+            server_errors.seek(0)
+            reject_sanitizer_diagnostics(server_errors.read().decode(errors='replace'), 'automatic HTTP server')
 print('automatic built-in HTTP server header trigger passed')
 
 if sys.platform.startswith('linux'):
@@ -222,7 +243,7 @@ if sys.platform.startswith('linux'):
         if remaining:
             current = current / ('y' * remaining)
             current.mkdir()
-        result = subprocess.run(['php', '-n', '-d', 'extension=' + extension,
+        result = run_php(['php', '-n', '-d', 'extension=' + extension,
             '-d', 'php_profiler.mode=always', '-d', 'php_profiler.output_dir=' + str(current),
             '-r', 'echo "ok";'], capture_output=True, check=True)
         assert result.stdout == b'ok' and b'automatic capture failed' in result.stderr
