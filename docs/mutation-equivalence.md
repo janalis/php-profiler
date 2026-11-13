@@ -381,7 +381,8 @@ The contexts add these three fixture symbols; compiler, plugin, libc, flags,
 ABI and the two recorded runtime compilation commands remain pinned.
 
 The renewed dependency closure includes the automatic adapter, private dependency
-transports and their contracts. Historical reports retain their original source
+transports and their contracts. The native mutation runner executes the C boundary
+contracts before the sampler and broader PHP workloads. Historical reports retain their original source
 snapshots and raw statuses. Renewal grants no classification to additional
 mutations unless their exact span, replacement and proof appear in the ledger.
 

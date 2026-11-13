@@ -25,6 +25,7 @@ echo "C mutation scratch: $scratch"
 
 # Exercise native contracts before broader PHP workloads, without filtering any
 # test. A failing mutation can stop promptly without rebuilding shared helpers.
+"${PHP:-php}" -n -d "extension=$PROFILER_EXTENSION" tests/native/c-boundaries.php
 PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" python3 scripts/sampling-controller-tests.py
 python3 scripts/native-bailout-tests.py
 scripts/native-fault-tests.sh
