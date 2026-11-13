@@ -6,13 +6,15 @@ MAGO ?= $(if $(wildcard target/tools/bin/mago),target/tools/bin/mago,mago)
 PHP_FILES := $(shell find php tests -type f -name '*.php' -not -path '*/target/*')
 C_FILES := $(shell find crates tests -type f -not -path '*/target/*' \( -name '*.c' -o -name '*.h' \))
 help:
-	@echo 'doctor fmt fmt-check lint build test test-php test-matrix coverage mutation check clean'
+	@echo 'bootstrap doctor fmt fmt-check lint build test test-php test-matrix coverage mutation check verify package package-install-smoke release-dry-run bench hooks clean'
 doctor:
 	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
 	rustc --version
 	cargo --version
 	php --version
 	php-config --version
+	shellcheck --version
+	actionlint -version
 	$(MAGO) --version
 	$(CLANG_FORMAT) --version
 fmt: formatter-versions
@@ -47,7 +49,7 @@ clean:
 
 .PHONY: package package-check verify
 package:
-	$(PYTHON) scripts/package-source.py --maintainer "$(PECL_MAINTAINER)" --name "$(PECL_NAME)" --email "$(PECL_EMAIL)"
+	$(PYTHON) scripts/package-source.py
 package-check:
 	$(PYTHON) -m json.tool composer.json >/dev/null
 	sh -n scripts/build-extension.sh
@@ -70,3 +72,7 @@ bench:
 .PHONY: formatter-versions
 formatter-versions:
 	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
+
+.PHONY: package-install-smoke
+package-install-smoke: package
+	scripts/package-install-smoke.sh

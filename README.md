@@ -120,4 +120,4 @@ ext-php-rs exception-ownership patch are retained under `vendor/`. MIT licensed.
 
 ## Repository development
 
-See [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md), and [release procedures](docs/releasing.md). Run `make bootstrap` then `make check` for ordinary development. `make verify` runs extended local validation; platform-specific CI gates remain required before release. The initial release channel is alpha. No registry release is currently available.
+See [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md), and [release procedures](docs/releasing.md). Run `make bootstrap` then `make check` for ordinary development. `make verify` runs extended local validation; platform-specific CI gates remain required before release. The initial release channel is alpha. The PIE package is registered on [Packagist](https://packagist.org/packages/janalis/php-profiler); tagged versions follow the alpha release channel.

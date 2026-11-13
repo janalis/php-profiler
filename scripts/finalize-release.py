@@ -1,4 +1,4 @@
-"""Resume a validated alpha release after public PECL upload; never overwrite a version."""
+"""Resume a validated PIE alpha release; never overwrite a version."""
 import argparse
 import hashlib
 import json
@@ -8,18 +8,13 @@ import re
 import subprocess
 import tarfile
 import tomllib
-import xml.etree.ElementTree as ET
 import urllib.request
+import time
 
 
 def fetch(url):
     with urllib.request.urlopen(url, timeout=30) as response:
         return response.read()
-
-
-def verify_pecl(archive, remote):
-    if hashlib.sha256(archive).digest() != hashlib.sha256(remote).digest():
-        raise ValueError("Public PECL archive differs from the validated candidate")
 
 
 def verify_packagist(payload, version, source):
@@ -41,26 +36,24 @@ def verify_packagist(payload, version, source):
 
 def verify_archive(body, version, committed):
     """Check every archive source byte against the immutable source commit."""
-    pecl_version = version.replace("-alpha.", "alpha")
-    prefix = "php_profiler-" + pecl_version + "/"
+    prefix = "php-profiler-" + version + "/"
     actual = {}
     with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as archive:
         for member in archive.getmembers():
-            if not member.isfile() or member.name in actual:
-                raise ValueError("Archive has non-file or duplicate entries")
-            actual[member.name] = archive.extractfile(member).read()
-    metadata = actual.pop("package.xml", None)
-    if metadata is None:
-        raise ValueError("Archive is missing package.xml")
-    package = ET.fromstring(metadata)
-    namespace = {"p": "http://pear.php.net/dtd/package-2.0"}
-    if (package.findtext("p:name", namespaces=namespace) != "php_profiler" or
-            package.findtext("p:version/p:release", namespaces=namespace) != pecl_version):
-        raise ValueError("Archive package/version does not match candidate")
+            if ".." in Path(member.name).parts or not (member.name == prefix.rstrip("/") or member.name.startswith(prefix)):
+                raise ValueError("Archive entry is outside the versioned source directory")
+            if member.isdir():
+                continue
+            if member.name in actual:
+                raise ValueError("Archive has duplicate entries")
+            if member.isfile():
+                actual[member.name] = archive.extractfile(member).read()
+            elif member.issym():
+                actual[member.name] = ("symlink", member.linkname)
+            else:
+                raise ValueError("Archive has unsupported entries")
     expected = {prefix + name: data for name, data in committed.items()
                 if name.split("/")[0] not in {"target", "mutants.out", ".github"}}
-    for name in ("config.m4", "Makefile.frag"):
-        expected[prefix + name] = committed["packaging/" + name]
     if actual != expected:
         raise ValueError("Archive source bytes do not match the committed candidate")
 
@@ -79,6 +72,8 @@ def verify_checkout(root, version, body):
         for member in archive.getmembers():
             if member.isfile():
                 committed[member.name] = archive.extractfile(member).read()
+            elif member.issym():
+                committed[member.name] = ("symlink", member.linkname)
     verify_archive(body, version, committed)
 
 
@@ -86,19 +81,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
     parser.add_argument("archive", type=Path)
+    parser.add_argument("--quality-run-id", required=True, type=int)
     args = parser.parse_args()
     if not re.fullmatch(r"0\.\d+\.\d+-alpha\.[1-9]\d*", args.version):
         parser.error("Only alpha publication is supported")
     root = Path(__file__).resolve().parent.parent
     source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     repo = "janalis/php-profiler"
+    run = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/actions/runs/{args.quality_run_id}"], text=True))
+    if (run.get("name") != "quality" or run.get("conclusion") != "success" or
+            run.get("head_sha") != source or run.get("head_branch") != "main" or
+            run.get("head_repository", {}).get("full_name") != repo or
+            run.get("event") not in {"push", "workflow_dispatch"}):
+        raise ValueError("Publication requires the exact successful main quality run")
+    current = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/git/ref/heads/main"], text=True))
+    if current["object"]["sha"] != source:
+        raise ValueError("Main advanced; never publish a stale candidate")
     tag = "v" + args.version
     body = args.archive.read_bytes()
     verify_checkout(root, args.version, body)
-    pecl_version = args.version.replace("-alpha.", "alpha")
-    verify_pecl(body, fetch(f"https://pecl.php.net/get/php_profiler-{pecl_version}.tgz"))
-    # Create the immutable tag only after the validated bytes are public on PECL.
-    # A later Packagist failure intentionally leaves this tag for resumable retries.
+    # Tags and release assets are immutable. Registry indexing can resume after publication.
     refs = json.loads(subprocess.check_output([
         "gh", "api", f"repos/{repo}/git/matching-refs/tags/{tag}"
     ], text=True))
@@ -107,14 +109,16 @@ def main():
         if existing[0]["object"]["sha"] != source or existing[0]["object"]["type"] != "commit":
             raise ValueError("Existing tag belongs to another source; never overwrite it")
     else:
+        latest = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/git/ref/heads/main"], text=True))
+        if latest["object"]["sha"] != source:
+            raise ValueError("Main advanced before tag creation; never publish a stale candidate")
         subprocess.run(["gh", "api", "--method", "POST", f"repos/{repo}/git/refs",
                         "-f", "ref=refs/tags/" + tag, "-f", "sha=" + source], check=True)
-    verify_packagist(json.loads(fetch("https://packagist.org/packages/janalis/php-profiler.json")), args.version, source)
     archive = args.archive.resolve()
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     checksum.write_text(hashlib.sha256(body).hexdigest() + "  " + archive.name + "\n")
-    releases = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/releases?per_page=100"], text=True))
-    release = next((item for item in releases if item["tag_name"] == tag), None)
+    releases = json.loads(subprocess.check_output(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"], text=True))
+    release = next((item for page in releases for item in page if item["tag_name"] == tag), None)
     if release:
         # Verify already published asset bytes before any retry resumes.
         for asset in release["assets"]:
@@ -130,8 +134,18 @@ def main():
         subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--prerelease",
                         "--title", tag, "--notes-file", str(root / "CHANGELOG.md"),
                         str(archive), str(checksum)], check=True)
+    # GitHub tag/release notifications drive Packagist indexing. A missing package or
+    # delayed webhook fails visibly after bounded retries, retaining immutable assets.
+    for attempt in range(4):
+        try:
+            verify_packagist(json.loads(fetch("https://packagist.org/packages/janalis/php-profiler.json")), args.version, source)
+            break
+        except (ValueError, OSError):
+            if attempt == 3:
+                raise
+            time.sleep(10)
     print(json.dumps({"version": args.version, "source": source, "sha256": hashlib.sha256(body).hexdigest(),
-                      "pecl": "verified", "packagist": "verified", "github": "published"}))
+                      "packagist": "verified", "github": "published"}))
 
 
 if __name__ == "__main__":
