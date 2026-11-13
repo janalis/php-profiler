@@ -5,3 +5,11 @@
 filter = 'package(php-profiler) & test(real_zend_runtime)'
 priority = -100
 threads-required = 'num-test-threads'
+
+# Check frame completion before tests that finalize captures. This deterministic
+# invariant detects non-progress without relying on timeout classification.
+# All remaining tests still run when the invariant passes.
+[[profile.default.overrides]]
+filter = 'package(profiler-core) & test(leaf_exit_commits_metrics_before_capture_finalization)'
+priority = 100
+threads-required = 'num-test-threads'

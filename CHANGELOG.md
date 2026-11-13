@@ -18,6 +18,8 @@ All notable changes are documented here using Semantic Versioning.
 
 ### Fixed
 
+- Assert frame completion before teardown so a broken close operation fails promptly.
+
 - Preserve same-line closure identity regression coverage through PHP formatting.
 - Isolate coverage profiles by executable and preserve strict LLVM diagnostics.
 - Keep private Zend helpers out of standalone Rust mutation test builds.

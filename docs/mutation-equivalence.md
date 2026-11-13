@@ -333,3 +333,20 @@ inspection, immutable source manifests, and complete recovered daemon logs.
 The authoritative ledger still requires exact sources and contexts. This renewal
 does not approve unrelated future source, compiler, dependency, or ABI changes,
 and does not describe a raw 100% mutation kill rate.
+
+### Test-only frame-completion regression
+
+A subsequent complete Rust mutation run recorded 680 caught, 259 confirmed
+compiler rejections, and one timeout for replacing `Engine::close` with a no-op.
+That historical run remains failed. A new unit test checks the completed leaf's
+call/time/memory metrics and empty active-frame state immediately after `exit`,
+before finalization can drain the stack. Nextest schedules this invariant first;
+all other tests still run when it passes. The targeted real mutation is now
+caught by an assertion with the original timeout unchanged. A fresh full Rust
+mutation run remains mandatory.
+
+The added code is entirely inside the existing `#[cfg(test)]` module. Production
+bytes preceding that module are identical. The native C source, machine readers,
+source spans, contexts and classifications are unchanged. Independent review
+approved refreshing only this core source's dependency hash and this explanatory
+proof document; it does not relabel the earlier timeout or approve future edits.
