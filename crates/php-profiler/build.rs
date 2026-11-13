@@ -79,6 +79,11 @@ fn main() {
         .expect("php-config required");
     assert!(output.status.success(), "php-config --includes failed");
     let mut build = cc::Build::new();
+    if std::env::var_os("PROFILER_ADAPTER_CONTRACT_TEST").is_some() {
+        println!("cargo:rerun-if-changed=../../tests/support/automatic-contract.rs");
+        println!("cargo:rerun-if-changed=../../tests/support/automatic-contract.c");
+        build.file("../../tests/support/automatic-contract.c");
+    }
     println!("cargo:rerun-if-env-changed=PROFILER_C_GCOV");
     if std::env::var_os("PROFILER_C_GCOV").is_some() {
         build.flag("--coverage");

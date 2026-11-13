@@ -121,3 +121,43 @@ ext-php-rs exception-ownership patch are retained under `vendor/`. MIT licensed.
 ## Repository development
 
 See [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md), and [release procedures](docs/releasing.md). Run `make bootstrap` then `make check` for ordinary development. `make verify` runs extended local validation; platform-specific CI gates remain required before release. The initial release channel is alpha. The PIE package is registered on [Packagist](https://packagist.org/packages/janalis/php-profiler); tagged versions follow the alpha release channel.
+
+## Automatic request capture
+
+Administrator-controlled PHP INI settings can start captures without application changes:
+
+```ini
+php_profiler.mode=trigger
+php_profiler.trigger_secret=replace-with-a-private-random-token
+php_profiler.output_dir=/var/private/php-profiles
+php_profiler.timeline=0
+php_profiler.sampling=0
+php_profiler.max_events=512
+```
+
+Create the absolute output directory in advance and grant the PHP worker write access.
+`mode` defaults to `off`; `trigger` requires `X-Php-Profiler-Trigger` matching the
+configured nonempty secret. `always` captures every request, including CLI.
+Settings cannot be changed with `ini_set()`. Sampling has the same platform limits
+as the PHP API. Event limits range from 1 through 8192.
+
+```sh
+curl -H "X-Php-Profiler-Trigger: $PROFILER_TOKEN" -D - https://example.test/
+```
+
+A successfully started HTTP capture queues `X-Php-Profiler-Id`. Its report is
+`php-profile-<id>.json` in the configured directory. This ID describes an attempted
+capture, not guaranteed persistence. CLI emits no header. Errors are logged and
+application execution continues. Reports are private; operators must arrange
+retention and cleanup. No report download endpoint is provided. Existing PHP API
+stop, disable and reset operations also apply to automatic sessions.
+
+For FPM, place these settings in the PHP INI loaded by the pool, or use pool
+`php_admin_value[php_profiler.mode] = trigger` and corresponding
+`php_admin_value[...]` entries for the other settings, then reload FPM. Configure
+`timeline` and `sampling` with `0` or `1`; both default to `0`. An empty
+`output_dir` disables automatic capture with a logged configuration error when
+capture is requested. The secret is only needed in trigger mode. Keep its value
+out of public PHP configuration diagnostics. HTTP servers must forward the
+trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; CLI environment variables
+cannot trigger a capture. Combined/comma-separated trigger values are rejected.

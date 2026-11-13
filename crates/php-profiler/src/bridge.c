@@ -300,3 +300,74 @@ int profiler_resolve_path(const char *path, unsigned char *output, size_t capaci
     zend_end_try();
     return success;
 }
+
+PHP_INI_BEGIN()
+PHP_INI_ENTRY("php_profiler.mode", "off", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY("php_profiler.trigger_secret", "", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY("php_profiler.output_dir", "", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY("php_profiler.timeline", "0", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY("php_profiler.sampling", "0", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY("php_profiler.max_events", "512", PHP_INI_SYSTEM, NULL)
+PHP_INI_END()
+int profiler_config_register(int number) { return zend_register_ini_entries(ini_entries, number); }
+void profiler_config_unregister(int number) { zend_unregister_ini_entries(number); }
+static int profiler_materialize_server(void) {
+    volatile int success = 0;
+    zend_try {
+        zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+        success = 1;
+    }
+    zend_catch { profiler_defer_bailout(); }
+    zend_end_try();
+    return success;
+}
+/* SAPI-owned request values only: never fall back to process environment. */
+int profiler_trigger_matches(const unsigned char *secret, size_t length) {
+    if (!strcmp(sapi_module.name, "cli") || !length || length > 4096)
+        return 0;
+    const char *value = NULL;
+    if (sapi_module.getenv) {
+        value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
+                                   sizeof("HTTP_X_PHP_PROFILER_TRIGGER") - 1);
+    } else {
+        /* Apache and the built-in HTTP server expose headers through _SERVER.
+         * Materialization is engine-owned, but may allocate: contain bailout. */
+        if (!profiler_materialize_server())
+            return 0;
+        zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
+        if (Z_TYPE_P(server) == IS_ARRAY) {
+            zval *header =
+                zend_hash_str_find(Z_ARRVAL_P(server), ZEND_STRL("HTTP_X_PHP_PROFILER_TRIGGER"));
+            if (header && Z_TYPE_P(header) == IS_STRING && Z_STRLEN_P(header) <= 4096)
+                value = Z_STRVAL_P(header);
+        }
+    }
+    if (!value || strnlen(value, 4097) != length || memchr(value, ',', length))
+        return 0;
+    volatile unsigned char difference = 0;
+    for (size_t i = 0; i < length; i++)
+        difference |= secret[i] ^ (unsigned char)value[i];
+    return difference == 0;
+}
+void profiler_auto_log(void) {
+    zend_try {
+        php_log_err(
+            "php_profiler: automatic capture failed; check configuration and output directory");
+    }
+    zend_catch { profiler_defer_bailout(); }
+    zend_end_try();
+}
+int profiler_auto_header(const char *value) {
+    if (!strcmp(sapi_module.name, "cli"))
+        return 1;
+    volatile int success = 0;
+    zend_try {
+        sapi_header_line line = {0};
+        line.line = (char *)value;
+        line.line_len = strlen(value);
+        success = sapi_header_op(SAPI_HEADER_REPLACE, &line) == SUCCESS;
+    }
+    zend_catch { profiler_defer_bailout(); }
+    zend_end_try();
+    return success;
+}

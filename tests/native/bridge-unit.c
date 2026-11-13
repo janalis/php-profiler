@@ -49,7 +49,44 @@ static int profiler_test_handle_count(void) {
 #define profiler_fiber_cleanup profiler_test_counted_cleanup
 #define profiler_fiber_destroy profiler_test_counted_destroy
 #endif
+#include <main/SAPI.h>
+static int automatic_fault;
+static void automatic_test_log(const char *message) {
+    if (automatic_fault == 1)
+        zend_bailout();
+    php_log_err(message);
+}
+static int automatic_test_header(sapi_header_op_enum op, void *argument) {
+    if (automatic_fault == 2)
+        zend_bailout();
+    if (automatic_fault == 3)
+        return FAILURE;
+    return sapi_header_op(op, argument);
+}
+static bool automatic_test_global(const char *name, size_t length) {
+    if (automatic_fault == 4)
+        zend_bailout();
+    return zend_is_auto_global_str(name, length);
+}
+static int automatic_test_register(const zend_ini_entry_def *entries, int number) {
+    const char *mode = getenv("PROFILER_TEST_BAILOUT");
+    if (mode && !strcmp(mode, "ini-register")) {
+        (void)write(2, "INJECTED_INI_REGISTER_FAILURE\n",
+                    sizeof("INJECTED_INI_REGISTER_FAILURE\n") - 1);
+        return FAILURE;
+    }
+    return zend_register_ini_entries(entries, number);
+}
+#undef php_log_err
+#define php_log_err automatic_test_log
+#define sapi_header_op automatic_test_header
+#define zend_is_auto_global_str automatic_test_global
+#define zend_register_ini_entries automatic_test_register
 #include "../../crates/php-profiler/src/bridge.c"
+#undef php_log_err
+#undef sapi_header_op
+#undef zend_is_auto_global_str
+#undef zend_register_ini_entries
 #undef profiler_register
 #undef profiler_fiber_cleanup
 #undef profiler_fiber_destroy
@@ -366,8 +403,79 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_named_cache, 0, 1, _IS_BOOL, 0)
 ZEND_ARG_TYPE_INFO(0, name, IS_STRING, 0)
 ZEND_END_ARG_INFO()
+#define AUTOMATIC_ASSERT(condition)                                                                \
+    do {                                                                                           \
+        if (!(condition))                                                                          \
+            zend_error_noreturn(E_ERROR, "automatic transport contract failed: %s", #condition);   \
+    } while (0)
+static char *automatic_test_value;
+static char *automatic_test_getenv(const char *name, size_t length) {
+    (void)name;
+    (void)length;
+    return automatic_test_value;
+}
+static PHP_FUNCTION(profiler_test_automatic_transports) {
+    (void)execute_data;
+    char *original_name = sapi_module.name;
+    char *(*original_getenv)(const char *, size_t) = sapi_module.getenv;
+    profiler_thread_flags original_flags = profiler_flags;
+    sapi_module.name = "cli";
+    AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 1);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    sapi_module.name = "contract-http";
+    sapi_module.getenv = automatic_test_getenv;
+    automatic_test_value = "secret";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 0) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 4097) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secrex", 6) == 0);
+    automatic_test_value = NULL;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    automatic_test_value = "short";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    automatic_test_value = "a,b";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"a,b", 3) == 0);
+    sapi_module.getenv = NULL;
+    zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+    zval saved = PG(http_globals)[TRACK_VARS_SERVER];
+    ZVAL_NULL(&PG(http_globals)[TRACK_VARS_SERVER]);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    array_init(&PG(http_globals)[TRACK_VARS_SERVER]);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    add_assoc_long(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", 42);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    char oversized[4098];
+    memset(oversized, 'x', 4097);
+    oversized[4097] = 0;
+    add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER",
+                     oversized);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    automatic_fault = 4;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    AUTOMATIC_ASSERT(profiler_flags.pending_bailout);
+    profiler_flags = original_flags;
+    automatic_fault = 1;
+    profiler_auto_log();
+    AUTOMATIC_ASSERT(profiler_flags.pending_bailout);
+    profiler_flags = original_flags;
+    automatic_fault = 2;
+    AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 0);
+    AUTOMATIC_ASSERT(profiler_flags.pending_bailout);
+    profiler_flags = original_flags;
+    automatic_fault = 3;
+    AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 0);
+    automatic_fault = 0;
+    zval_ptr_dtor(&PG(http_globals)[TRACK_VARS_SERVER]);
+    PG(http_globals)[TRACK_VARS_SERVER] = saved;
+    sapi_module.name = original_name;
+    sapi_module.getenv = original_getenv;
+    RETURN_TRUE;
+}
 static const zend_function_entry guard_functions[] = {
-    ZEND_FE(profiler_test_guard_contract, arginfo_guard_contract)
+    ZEND_FE(profiler_test_automatic_transports,
+            arginfo_uid_bool) ZEND_FE(profiler_test_guard_contract, arginfo_guard_contract)
         ZEND_FE(profiler_test_uid_allocator, arginfo_uid_bool) ZEND_FE(profiler_test_uid_threads,
                                                                        arginfo_uid_bool)
             ZEND_FE(profiler_test_uid_cache, arginfo_uid_closure) ZEND_FE(profiler_test_named_cache,
