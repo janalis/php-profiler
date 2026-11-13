@@ -139,7 +139,7 @@ jobs:
           CLANG_PATH: /usr/bin/clang-23
           LIBCLANG_PATH: /usr/lib/llvm-23/lib
           PROFILER_COVERAGE_TOOLCHAIN: nightly-2026-11-11
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: coverage
@@ -175,7 +175,7 @@ jobs:
           coverage: none
           extensions: pdo_sqlite, curl, pcntl
       - run: python3 scripts/rust-mutation.py --timeout 240 --jobs 2
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: mutants
@@ -212,12 +212,12 @@ jobs:
           for directory in target/compatibility target/performance; do
             if test -d "$directory"; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: compatibility-${{ matrix.php }}-${{ matrix.sapi }}
           path: target/compatibility
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: performance-${{ matrix.php }}-${{ matrix.sapi }}
@@ -283,7 +283,7 @@ jobs:
               python3 scripts/php-environment-check.py --version 8.3 --zts "${{ matrix.zts }}"
               scripts/c-mutation.sh
             '
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: c-mutation-${{ matrix.zts }}
@@ -313,7 +313,7 @@ jobs:
           for directory in target/clang-gcov-${{ matrix.sapi }}; do
             if test -d "$directory"; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: clang-c-coverage-${{ matrix.sapi }}
@@ -371,7 +371,7 @@ jobs:
         with:
           toolchain: '1.99.1'
       - run: python3 scripts/vendor-patch-mutation.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: vendored-ownership-mutation-${{ matrix.php }}
@@ -396,7 +396,7 @@ jobs:
           for directory in target/zts-sampling-ci; do
             if test -d "$directory"; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: zts-sampling-isolation
