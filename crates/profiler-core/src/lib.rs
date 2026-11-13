@@ -1236,6 +1236,25 @@ fn add(target: &mut Metrics, value: &Metrics, arithmetic: &mut Arithmetic) {
 mod tests {
     use super::*;
     #[test]
+    fn leaf_exit_commits_metrics_before_capture_finalization() {
+        let mut engine = Engine::new(8);
+        engine.start(0, 0, 100);
+        engine.enter(7, "leaf", 10, 5, 100);
+        engine.exit(7, 40, 20, 120);
+
+        // Observe completion before teardown can drain outstanding frames.
+        // A missing close must fail here, rather than hanging in finalization.
+        let metrics = &engine.functions[0].metrics;
+        assert_eq!(metrics.calls, 1);
+        assert_eq!(metrics.inclusive_wall_ns, 30);
+        assert_eq!(metrics.exclusive_wall_ns, 30);
+        assert_eq!(metrics.inclusive_cpu_ns, 15);
+        assert_eq!(metrics.exclusive_cpu_ns, 15);
+        assert_eq!(metrics.memory_delta_bytes, 20);
+        assert_eq!(engine.active_frames, 0);
+        assert!(engine.head.is_none());
+    }
+    #[test]
     fn indexed_lookup_preserves_early_records_after_crossing_the_small_graph_threshold() {
         assert!(use_linear_lookup(0));
         assert!(use_linear_lookup(8));

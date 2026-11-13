@@ -1,5 +1,9 @@
 # Audited equivalent mutations
 
+The narrative proof sections retain their historical source coordinates. The
+[current coordinate translation](#2026-11-13-formatting-renewal) and the exact
+ledger identify the renewed source.
+
 Raw tool outcomes are never rewritten. A generated mutant may be classified as
 behaviorally equivalent only through an exact, reviewed ledger entry tied to its
 source file hash, mutator, source span and replacement. A changed file, location,
@@ -265,3 +269,84 @@ A subsequent classification replay must use separately frozen audited metadata
 and preserve the original failed full-run result. It may validate unchanged raw
 reports, native contexts and exact runtime/consumer dependencies; it must not
 represent a new mutation execution or claim that all raw mutants were killed.
+
+## 2026-11-13 formatting renewal
+
+The existing 22 entries were independently re-reviewed after first-party native
+formatting and the extension registration name change to `php_profiler`.
+Classification, replacement expressions, proof anchors, and ABI scopes remain
+unchanged. The table records exact start/end coordinates, not approximate lines.
+
+| Source | Mutator | Historical span | Renewed span | Replacement |
+| --- | --- | --- | --- | --- |
+| `bridge.c` | `cxx_assign_const` | 78:64–78:65 | 89:33–89:34 | `= 42;` |
+| `bridge.c` | `cxx_assign_const` | 78:104–78:105 | 90:36–90:37 | `= 42;` |
+| `bridge.c` | `cxx_assign_const` | 124:43–124:44 | 146:43–146:44 | `= 42;` |
+| `bridge.c` | `cxx_assign_const` | 154:73–154:74 | 180:40–180:41 | `= 42;` |
+| `bridge.c` | `cxx_assign_const` | 250:80–250:81 | 295:25–295:26 | `= 42;` |
+| `bridge.c` | `cxx_init_const` | 47:14–47:22 | 50:14–50:22 | `42` |
+| `bridge.c` | `cxx_init_const` | 234:19–234:26 | 279:19–279:26 | `42` |
+| `bridge.c` | `cxx_remove_void_call` | 39:5–39:25 | 42:5–42:25 | `` |
+| `sampling.c` | `cxx_add_to_sub` | 178:23–178:24 | 247:52–247:53 | `-` |
+| `sampling.c` | `cxx_assign_const` | 126:29–126:30 | 165:30–165:31 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 200:39–200:40 | 294:16–294:17 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 209:58–209:59 | 311:28–311:29 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 211:84–211:85 | 316:28–316:29 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 219:30–219:31 | 328:24–328:25 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 243:31–243:32 | 375:32–375:33 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 250:46–250:47 | 388:35–388:36 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 290:15–290:16 | 443:16–443:17 | `= 42;` |
+| `sampling.c` | `cxx_assign_const` | 312:136–312:137 | 479:29–479:30 | `= 42;` |
+| `sampling.c` | `cxx_eq_to_ne` | 243:46–243:48 | 375:49–375:51 | `!=` |
+| `sampling.c` | `cxx_init_const` | 233:22–233:29 | 349:22–349:29 | `42` |
+| `sampling.c` | `cxx_replace_scalar_call` | 124:13–124:26 | 163:13–163:26 | `42` |
+| `sampling.c` | `cxx_replace_scalar_call` | 159:5–159:42 | 219:5–219:42 | `42` |
+
+The complete ordinary inventories map bijectively: 392 NTS and 395 ZTS mutation
+identities, with no omitted or added identity. Both production C token streams
+and the five changed C fixtures match the prior source after C line splicing,
+comment removal, and whitespace removal. Zend declaration macros retain their
+original tokens in explicitly guarded formatting blocks.
+
+Fresh actual compiler, plugin, PHP ABI, native command, and libc contexts match
+the audited contexts exactly. The emitted DSO hashes used for machine inspection
+match those used by the full mutation collectors. Inspection covers 623 NTS and
+632 ZTS emitted functions. After debug-location removal and bijective mutation
+symbol translation, 620 NTS and 629 ZTS function bodies match. The only three
+remaining differences per ABI are Zend's implicit `_zend_bailout` diagnostic line
+argument changing from 154 to 181. This diagnostic coordinate changes in the
+original and relevant clones; it does not change the Boolean-reader or allocator
+proofs. No claim of complete binary identity is made.
+
+Fresh complete raw outcomes are NTS 370 Killed / 22 Survived and ZTS 374 Killed /
+21 Survived. Every survivor matches an existing translated entry; there are no
+unknown outcomes or timeouts. All raw survivor statuses remain untouched. The
+initial collector gates rejected the historical dependency hashes as intended;
+renewed acceptance is a separate strict-checker result, not a rewritten collector
+receipt. Dependency hashes are renewed only for the reviewed crate metadata,
+module registration, formatted native sources/fixtures, and this proof document.
+
+Local source-qualified evidence is retained under
+`target/mutation-renewal-audit/`: `completed-review.json`,
+`full-span-bijection.json`, `ir-comparison.json`, the raw reports, machine reader
+inspection, immutable source manifests, and complete recovered daemon logs.
+The authoritative ledger still requires exact sources and contexts. This renewal
+does not approve unrelated future source, compiler, dependency, or ABI changes,
+and does not describe a raw 100% mutation kill rate.
+
+### Test-only frame-completion regression
+
+A subsequent complete Rust mutation run recorded 680 caught, 259 confirmed
+compiler rejections, and one timeout for replacing `Engine::close` with a no-op.
+That historical run remains failed. A new unit test checks the completed leaf's
+call/time/memory metrics and empty active-frame state immediately after `exit`,
+before finalization can drain the stack. Nextest schedules this invariant first;
+all other tests still run when it passes. The targeted real mutation is now
+caught by an assertion with the original timeout unchanged. A fresh full Rust
+mutation run remains mandatory.
+
+The added code is entirely inside the existing `#[cfg(test)]` module. Production
+bytes preceding that module are identical. The native C source, machine readers,
+source spans, contexts and classifications are unchanged. Independent review
+approved refreshing only this core source's dependency hash and this explanatory
+proof document; it does not relabel the earlier timeout or approve future edits.

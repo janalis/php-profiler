@@ -1,13 +1,45 @@
 # Validation and release gates
 
-Production readiness is **not established**. Verification is local; remote CI
-has not run. Disabled tiny-call wall ratios remain 1.3910–1.4481 cold and
+Production readiness is **not established**. Repository CI enforces the
+required gates; exact-source workflow results are available in
+[GitHub Actions](https://github.com/janalis/php-profiler/actions/workflows/ci.yml).
+Historical receipts below remain scoped to their recorded sources. Disabled tiny-call wall ratios remain 1.3910–1.4481 cold and
 1.3773–1.5651 after a stopped/reset capture. Exact default allocation
 counts/volume/session peaks and unbiased CPU sampling remain unavailable.
 See [measurement limits](capabilities-feasibility.md) and
 [measured overhead](observer-overhead.md).
 
-## Current startup-hardened implementation
+## Repository automation renewal
+
+Fresh Linux ARM64 PHP 8.3.36 NTS runtime Rust coverage passes 5,686/5,686
+lines, 535/535 functions and 638/638 branches with strict independent unit/native
+cohort exports. All export diagnostics are empty. Raw exports and profiles remain
+under `target/cohort-linux-coverage/run-d6nftS0d/`; the separately hashed final
+helper replay reproduces the same source-union metrics without changing the
+original run receipt.
+
+Fresh x86-64 PHP 8.3.36 native mutation runs cover all 392 NTS and 395 ZTS
+candidates. Raw counts are 370 Killed / 22 Survived and 374 Killed / 21 Survived.
+An independent source/IR/context review renewed the same existing equivalence
+entries after formatting. Separate strict checker results pass 370/370 and
+374/374 non-equivalent candidates. Original collector receipts and raw statuses
+are retained under `target/mutation-renewal-audit/`; the initial old-ledger
+rejections are not relabeled as successful full collector runs. See the
+[coordinate translation and proof](mutation-equivalence.md#2026-11-13-formatting-renewal).
+
+The nine CLI/ZTS/FPM compatibility cells passed on the immutable runtime snapshot
+in `target/repository-tooling-matrix/`. Actual PIE 1.5.5 built the committed source
+archive and its module passed the PHP functional suite; receipts are in
+`target/final-head-pie-smoke.log` and `target/packaged-extension-functional.log`.
+The local PHP 8.5.12 ZTS SDK required an explicit `php-config` wrapper because its
+`--php-binary` field reports `NONE`; the wrapper changes only that SDK metadata
+field. No host extension installation or php.ini changes were performed.
+
+These local receipts do not replace required CI on the final merged commit or
+its versioned release candidate. Source-bound mutation and coverage inputs are
+fingerprinted, and changed inputs require renewed validation.
+
+## Historical startup-hardened snapshot (333 inputs)
 
 The frozen snapshot contains 333 canonical inputs:
 `target/final-startup-native-source-receipt.json`. All 11 runtime Rust/C files
