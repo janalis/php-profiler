@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Refresh cached Packagist metadata when verifying an automatically published alpha.
+
 ## [0.1.0-alpha.1] - 2026-11-13
 
 ### Commits
