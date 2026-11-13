@@ -1,5 +1,11 @@
 name: automatic-alpha-release
 on:
+  workflow_dispatch:
+    inputs:
+      quality_run_id:
+        description: Exact quality run to independently verify and continue
+        required: true
+        type: string
   workflow_run:
     workflows: [quality]
     types: [completed]
@@ -11,18 +17,20 @@ concurrency:
 jobs:
   release:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
       (github.event.workflow_run.head_branch == 'main' ||
        (startsWith(github.event.workflow_run.head_branch, 'release/') &&
         github.event.workflow_run.event == 'workflow_dispatch' &&
-        github.event.workflow_run.actor.login == 'github-actions[bot]'))
+        github.event.workflow_run.actor.login == 'github-actions[bot]')))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       pull-requests: write
       actions: write
+      statuses: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,5 +51,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
-          QUALITY_RUN_ID: ${{ github.event.workflow_run.id }}
+          QUALITY_RUN_ID: ${{ inputs.quality_run_id || github.event.workflow_run.id }}
         run: python3 scripts/release-automation.py "$QUALITY_RUN_ID"
