@@ -1,0 +1,7 @@
+# Finish pure assertions before the native test rebuilds the extension, and
+# keep that Cargo child exclusive while it owns the shared build artifacts.
+# This changes scheduling only: all tests run and failures still fail fast.
+[[profile.default.overrides]]
+filter = 'package(php-profiler) & test(real_zend_runtime)'
+priority = -100
+threads-required = 'num-test-threads'

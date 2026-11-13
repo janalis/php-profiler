@@ -1,0 +1,8 @@
+/target
+Cargo.lock
+/.vscode
+/.idea
+/tmp
+/.direnv
+expand.rs
+callgrind.out.*

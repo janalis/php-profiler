@@ -1,0 +1,11 @@
+target
+**/target
+.git
+mutants.out
+__pycache__
+**/__pycache__
+*.profraw
+*.profdata
+.DS_Store
+
+**/.DS_Store

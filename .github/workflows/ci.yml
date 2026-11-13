@@ -1,0 +1,357 @@
+name: quality
+on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  static-analysis:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: shellcheck@0.11.0
+          fallback: none
+      - name: Install pinned actionlint
+        shell: bash
+        run: |
+          curl --fail --show-error --location https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o /tmp/profiler-actionlint.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/profiler-actionlint.tar.gz' | sha256sum --check
+          tar -xzf /tmp/profiler-actionlint.tar.gz -C /tmp actionlint
+          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+          actionlint -version
+          shellcheck --version
+      - run: actionlint
+      - name: Validate squash commit title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 scripts/check-pr-title.py
+      - run: shellcheck scripts/*.sh
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      CI_PROFILER_REQUIRE_SAMPLING: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
+        zts: ['nts', 'ts']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        env:
+          phpts: ${{ matrix.zts }}
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          extensions: pdo_sqlite, curl, pcntl
+      - name: Verify requested PHP and SDK labels
+        run: python3 scripts/php-environment-check.py --version '${{ matrix.php }}' --zts '${{ matrix.zts }}'
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: python3 -m unittest discover -s tests/python
+      - run: cargo build -p php-profiler
+      - run: scripts/php-tests.sh
+      - name: Verify large timeline persistence and accessor boundary once
+        run: php -n -d "extension=$PWD/target/debug/libphp_profiler.so" tests/native/large-profile-boundary.php
+      - run: python3 scripts/test-vendored-exception.py
+      - run: python3 scripts/clone-bailout-tests.py
+      - run: python3 scripts/exception-bailout-tests.py
+      - run: python3 scripts/adapter-contract-tests.py
+      - name: Validate real reports against the published schema
+        run: |
+          python3 -m venv target/dev-venv
+          target/dev-venv/bin/pip install -r requirements-dev.txt
+          PROFILER_EXTENSION="$PWD/target/debug/libphp_profiler.so" target/dev-venv/bin/python scripts/schema-tests.py
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      CI_PROFILER_REQUIRE_SAMPLING: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: pdo_sqlite, curl, pcntl
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: nightly-2026-11-11
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@3f7c3597aa4e6da3f315e128de702ce61e7b2877 # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      - name: Install matching LLVM 23 C instrumentation
+        shell: bash
+        run: |
+          curl --fail --show-error --location https://apt.llvm.org/llvm.sh -o /tmp/llvm-install.sh
+          sudo bash /tmp/llvm-install.sh 23
+          clang-23 --version
+      - run: scripts/native-coverage.sh
+        env:
+          CC: clang-23
+          PROFILER_COVERAGE_TOOLCHAIN: nightly-2026-11-11
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage
+          path: target/native-cov/**/*.json
+  mutation:
+    runs-on: ubuntu-latest
+    env:
+      CI_PROFILER_REQUIRE_SAMPLING: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+      - uses: taiki-e/install-action@233ea3d5a8f521181c3a09288602960c3f72f1d8 # cargo-mutants
+        with:
+          tool: cargo-mutants@27.1.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: nextest@0.9.151
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: pdo_sqlite, curl, pcntl
+      - run: python3 scripts/rust-mutation.py --timeout 240 --jobs 2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: mutants
+          path: target/rust-mutation/**
+
+  docker-sapis:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
+        sapi: ['cli', 'zts', 'fpm']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: scripts/docker-matrix.sh
+        env:
+          PHP_VERSIONS: ${{ matrix.php }}
+          PHP_SAPIS: ${{ matrix.sapi }}
+      - name: Record CPU and wall performance evidence with runtime networking disabled
+        shell: bash
+        run: |
+          mkdir -p target/performance
+          fpm_args=()
+          if [[ '${{ matrix.sapi }}' == fpm ]]; then fpm_args=(--fpm); fi
+          docker run --rm --network=none -v "$PWD/target/performance:/evidence" \
+            'local-php-profiler:${{ matrix.php }}-${{ matrix.sapi }}' \
+            python3 scripts/performance-evidence.py --extension /profiler/target/release/libphp_profiler.so \
+            --output /evidence --with-sampling --with-warm-disabled "${fpm_args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: compatibility-${{ matrix.php }}-${{ matrix.sapi }}
+          path: target/compatibility
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: performance-${{ matrix.php }}-${{ matrix.sapi }}
+          path: target/performance
+
+  address-sanitizer:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        env:
+          phpts: ts
+        with:
+          php-version: '8.5'
+          coverage: none
+          extensions: pdo_sqlite, curl, pcntl
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: nightly-2026-11-11
+      - name: Install matching Clang
+        run: |
+          brew install llvm
+          "$(brew --prefix llvm)/bin/clang" --version | tee /tmp/profiler-clang-version
+          rg 'version 23\.' /tmp/profiler-clang-version
+          {
+            echo "CC=$(brew --prefix llvm)/bin/clang"
+            echo "CLANG_PATH=$(brew --prefix llvm)/bin/clang"
+            echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib"
+          } >> "$GITHUB_ENV"
+      - run: scripts/native-sanitizers.sh
+        env:
+          PROFILER_SANITIZER_TOOLCHAIN: nightly-2026-11-11
+
+  c-mutation:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - zts: nts
+            php_image: php:8.3.36-cli-bookworm@sha256:232331112d3a7c5b98edeeddc3b85f610172f99352c0635fe6b3e166e47062cb
+          - zts: ts
+            php_image: php:8.3.36-zts-bookworm@sha256:47d3c81c4f256ce9070e129648fb210d5ba2c968aa89d264024b70acdab569a1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build the audited AMD64 compiler, libc, PHP SDK and mutator cohort
+        run: >-
+          docker build --platform=linux/amd64 -f tests/docker/CMutation.Dockerfile
+          --build-arg 'PHP_IMAGE=${{ matrix.php_image }}'
+          -t profiler-c-mutation:${{ matrix.zts }} .
+      - name: Check actual ABI and mutate every ordinary runtime C callsite offline
+        shell: bash
+        run: |
+          docker run --rm --platform=linux/amd64 --network=none \
+            --user "$(id -u):$(id -g)" -v "$PWD:/source" \
+            -e CARGO_HOME=/source/target/c-mutation-cargo -e CARGO_NET_OFFLINE=true \
+            -e CI_PROFILER_REQUIRE_SAMPLING=1 -e MULL_TIMEOUT_MS=240000 -e MULL_WORKERS=2 \
+            profiler-c-mutation:${{ matrix.zts }} bash -euc '
+              mkdir -p "$CARGO_HOME"
+              cp -R /usr/local/cargo/registry "$CARGO_HOME/"
+              python3 scripts/php-environment-check.py --version 8.3 --zts "${{ matrix.zts }}"
+              scripts/c-mutation.sh
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: c-mutation-${{ matrix.zts }}
+          path: target/c-mutants/results
+
+  clang-c-coverage:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sapi: ['cli', 'zts']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build source image and pinned Clang edge-coverage tools
+        run: |
+          docker build -f tests/docker/Dockerfile --build-arg PHP_IMAGE=php:8.3-${{ matrix.sapi }}-bookworm -t local-php-profiler-coverage:8.3-${{ matrix.sapi }} .
+          docker build -f tests/docker/ClangCoverage.Dockerfile --build-arg BASE_IMAGE=local-php-profiler-coverage:8.3-${{ matrix.sapi }} -t local-php-profiler-clang-gcov:8.3-${{ matrix.sapi }} .
+      - name: Require every raw first-party C line, function and edge
+        run: |
+          mkdir -p target/clang-gcov-${{ matrix.sapi }}
+          docker run --rm -v "$PWD/target/clang-gcov-${{ matrix.sapi }}:/evidence" -e CARGO_TARGET_DIR=/evidence local-php-profiler-clang-gcov:8.3-${{ matrix.sapi }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: clang-c-coverage-${{ matrix.sapi }}
+          path: target/clang-gcov-${{ matrix.sapi }}/**
+
+  zts-thread-isolation:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        env:
+          phpts: ts
+        with:
+          php-version: '8.5'
+          coverage: none
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+      - name: Require a matching ZTS embed installation
+        run: |
+          php -r 'if (!PHP_ZTS) { throw new RuntimeException("ZTS PHP is required"); }'
+          test -f "$(php-config --prefix)/lib/libphp.dylib"
+      - run: cargo build -p php-profiler
+      - run: python3 scripts/zts-thread-tests.py
+        env:
+          PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
+      - run: python3 scripts/engine-metadata-tests.py
+        env:
+          PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
+
+  vendored-ownership-mutation:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.5']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+      - run: python3 scripts/vendor-patch-mutation.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: vendored-ownership-mutation-${{ matrix.php }}
+          path: target/vendor-patch-mutation
+
+  zts-sampling-isolation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build pinned matching Linux ZTS embed SDK and actual extension
+        run: docker build -f tests/docker/SamplingEmbed.Dockerfile -t profiler-sampling-embed .
+      - name: Verify sampled requests, thread destruction and DSO retirement offline
+        run: |
+          mkdir -p target/zts-sampling-ci
+          docker run --rm --network=none -v "$PWD/target/zts-sampling-ci:/receipts" \
+            profiler-sampling-embed python3 scripts/zts-sampling-tests.py --output /receipts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: zts-sampling-isolation
+          path: target/zts-sampling-ci/**
+
+  formatting:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt
+      - run: python3 scripts/bootstrap-tools.py
+      - run: make fmt-check
+
+  release-tooling:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node --test scripts/release-tools.test.mjs
+      - run: python3 -m unittest discover -s tests/python
+      - run: make package-check
+
+  quality-gate:
+    if: always()
+    needs: [static-analysis, integration, coverage, mutation, docker-sapis, address-sanitizer, c-mutation, clang-c-coverage, zts-thread-isolation, vendored-ownership-mutation, zts-sampling-isolation, formatting, release-tooling]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every quality job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          jobs = json.loads(os.environ['RESULTS'])
+          failed = [name for name, job in jobs.items() if job['result'] != 'success']
+          if failed:
+              raise SystemExit('Unsuccessful quality jobs: ' + ', '.join(failed))
+          PYCODE

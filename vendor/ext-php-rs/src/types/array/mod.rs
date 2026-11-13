@@ -1,0 +1,1058 @@
+//! Represents an array in PHP. As all arrays in PHP are associative arrays,
+//! they are represented by hash tables.
+
+use std::{convert::TryFrom, fmt::Debug, ptr};
+
+use crate::{
+    boxed::{ZBox, ZBoxable},
+    convert::{FromZval, FromZvalMut, IntoZval},
+    error::Result,
+    ffi::zend_ulong,
+    ffi::{
+        _zend_new_array, GC_FLAGS_MASK, GC_FLAGS_SHIFT, HT_MIN_SIZE, zend_array_count,
+        zend_array_destroy, zend_array_dup, zend_empty_array, zend_hash_clean, zend_hash_del,
+        zend_hash_find, zend_hash_index_del, zend_hash_index_find, zend_hash_index_update,
+        zend_hash_next_index_insert, zend_hash_str_del, zend_hash_str_find, zend_hash_str_update,
+        zend_hash_update,
+    },
+    flags::{DataType, ZvalTypeFlags},
+    types::Zval,
+};
+
+mod array_key;
+mod conversions;
+mod entry;
+mod iterators;
+
+pub use array_key::ArrayKey;
+pub use entry::{Entry, OccupiedEntry, VacantEntry};
+pub use iterators::{Iter, Values};
+
+/// A PHP hashtable.
+///
+/// In PHP, arrays are represented as hashtables. This allows you to push values
+/// onto the end of the array like a vector, while also allowing you to insert
+/// at arbitrary string key indexes.
+///
+/// A PHP hashtable stores values as [`Zval`]s. This allows you to insert
+/// different types into the same hashtable. Types must implement [`IntoZval`]
+/// to be able to be inserted into the hashtable.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ext_php_rs::types::ZendHashTable;
+///
+/// let mut ht = ZendHashTable::new();
+/// ht.push(1);
+/// ht.push("Hello, world!");
+/// ht.insert("Like", "Hashtable");
+///
+/// assert_eq!(ht.len(), 3);
+/// assert_eq!(ht.get_index(0).and_then(|zv| zv.long()), Some(1));
+/// ```
+pub type ZendHashTable = crate::ffi::HashTable;
+
+// Clippy complains about there being no `is_empty` function when implementing
+// on the alias `ZendStr` :( <https://github.com/rust-lang/rust-clippy/issues/7702>
+#[allow(clippy::len_without_is_empty)]
+/// Copies the value a bucket holds, so it survives the bucket's removal.
+///
+/// A symbol table stores `IS_INDIRECT` zvals pointing at compiled-variable slots;
+/// those are engine-internal and never valid as a returned value, so the copy
+/// is taken from the slot they point to.
+fn removed_value(bucket: &Zval) -> Zval {
+    bucket.indirect().unwrap_or(bucket).shallow_clone()
+}
+
+impl ZendHashTable {
+    /// Creates a new, empty, PHP hashtable, returned inside a [`ZBox`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let ht = ZendHashTable::new();
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if memory for the hashtable could not be allocated.
+    #[must_use]
+    pub fn new() -> ZBox<Self> {
+        Self::with_capacity(HT_MIN_SIZE)
+    }
+
+    /// Creates a new, empty, PHP hashtable with an initial size, returned
+    /// inside a [`ZBox`].
+    ///
+    /// # Parameters
+    ///
+    /// * `size` - The size to initialize the array with.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let ht = ZendHashTable::with_capacity(10);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if memory for the hashtable could not be allocated.
+    #[must_use]
+    pub fn with_capacity(size: u32) -> ZBox<Self> {
+        unsafe {
+            // SAFETY: PHP allocator handles the creation of the array.
+            #[allow(clippy::used_underscore_items)]
+            let ptr = _zend_new_array(size);
+
+            ZBox::from_zend_alloc(ptr)
+        }
+    }
+
+    /// Returns the current number of elements in the array.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push(1);
+    /// ht.push("Hello, world");
+    ///
+    /// assert_eq!(ht.len(), 2);
+    /// ```
+    #[must_use]
+    pub fn len(&self) -> usize {
+        unsafe { zend_array_count(ptr::from_ref(self).cast_mut()) as usize }
+    }
+
+    /// Returns whether the hash table is empty.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// assert_eq!(ht.is_empty(), true);
+    ///
+    /// ht.push(1);
+    /// ht.push("Hello, world");
+    ///
+    /// assert_eq!(ht.is_empty(), false);
+    /// ```
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Clears the hash table, removing all values.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert("test", "hello world");
+    /// assert_eq!(ht.is_empty(), false);
+    ///
+    /// ht.clear();
+    /// assert_eq!(ht.is_empty(), true);
+    /// ```
+    pub fn clear(&mut self) {
+        unsafe { zend_hash_clean(self) }
+    }
+
+    /// Attempts to retrieve a value from the hash table with a string key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to search for in the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&Zval)` - A reference to the zval at the position in the hash
+    ///   table.
+    /// * `None` - No value at the given position was found.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert("test", "hello world");
+    /// assert_eq!(ht.get("test").and_then(|zv| zv.str()), Some("hello world"));
+    /// ```
+    #[must_use]
+    pub fn get<'a, K>(&self, key: K) -> Option<&Zval>
+    where
+        K: Into<ArrayKey<'a>>,
+    {
+        match key.into() {
+            ArrayKey::Long(index) => unsafe {
+                #[allow(clippy::cast_sign_loss)]
+                zend_hash_index_find(self, index as zend_ulong).as_ref()
+            },
+            ArrayKey::String(key) => unsafe {
+                zend_hash_str_find(self, key.as_ptr().cast(), key.len() as _).as_ref()
+            },
+            ArrayKey::Str(key) => unsafe {
+                zend_hash_str_find(self, key.as_ptr().cast(), key.len() as _).as_ref()
+            },
+            ArrayKey::ZendString(key) => unsafe {
+                zend_hash_find(self, key.as_ptr().cast_mut()).as_ref()
+            },
+        }
+    }
+
+    /// Attempts to retrieve a mutable reference to a value in the hash table
+    /// with a string key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to search for in the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&mut Zval)` - A mutable reference to the zval at the position in
+    ///   the hash table.
+    /// * `None` - No value at the given position was found.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert("test", "hello world");
+    /// if let Some(zv) = ht.get_mut("test") {
+    ///     zv.set_long(42);
+    /// }
+    /// assert_eq!(ht.get("test").and_then(|zv| zv.long()), Some(42));
+    /// ```
+    ///
+    /// Holding two mutable references to the same entry is rejected at compile
+    /// time, which is why this takes `&mut self`:
+    ///
+    /// ```compile_fail
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    /// let _ = ht.insert("test", 1);
+    ///
+    /// let first = ht.get_mut("test").unwrap();
+    /// let second = ht.get_mut("test").unwrap();
+    ///
+    /// first.set_long(2);
+    /// ```
+    #[must_use]
+    pub fn get_mut<'a, K>(&mut self, key: K) -> Option<&mut Zval>
+    where
+        K: Into<ArrayKey<'a>>,
+    {
+        match key.into() {
+            ArrayKey::Long(index) => unsafe {
+                #[allow(clippy::cast_sign_loss)]
+                zend_hash_index_find(self, index as zend_ulong).as_mut()
+            },
+            ArrayKey::String(key) => unsafe {
+                zend_hash_str_find(self, key.as_ptr().cast(), key.len() as _).as_mut()
+            },
+            ArrayKey::Str(key) => unsafe {
+                zend_hash_str_find(self, key.as_ptr().cast(), key.len() as _).as_mut()
+            },
+            ArrayKey::ZendString(key) => unsafe {
+                zend_hash_find(self, key.as_ptr().cast_mut()).as_mut()
+            },
+        }
+    }
+
+    /// Attempts to retrieve a value from the hash table with an index.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to search for in the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&Zval)` - A reference to the zval at the position in the hash
+    ///   table.
+    /// * `None` - No value at the given position was found.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push(100);
+    /// assert_eq!(ht.get_index(0).and_then(|zv| zv.long()), Some(100));
+    /// ```
+    #[must_use]
+    pub fn get_index(&self, key: i64) -> Option<&Zval> {
+        #[allow(clippy::cast_sign_loss)]
+        unsafe {
+            zend_hash_index_find(self, key as zend_ulong).as_ref()
+        }
+    }
+
+    /// Attempts to retrieve a mutable reference to a value in the hash table
+    /// with an index.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to search for in the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&mut Zval)` - A mutable reference to the zval at the position in
+    ///   the hash table.
+    /// * `None` - No value at the given position was found.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push(100);
+    /// if let Some(zv) = ht.get_index_mut(0) {
+    ///     zv.set_long(200);
+    /// }
+    /// assert_eq!(ht.get_index(0).and_then(|zv| zv.long()), Some(200));
+    /// ```
+    ///
+    /// Holding two mutable references to the same index is rejected at compile
+    /// time, which is why this takes `&mut self`:
+    ///
+    /// ```compile_fail
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    /// let _ = ht.push(100);
+    ///
+    /// let first = ht.get_index_mut(0).unwrap();
+    /// let second = ht.get_index_mut(0).unwrap();
+    ///
+    /// first.set_long(200);
+    /// ```
+    #[must_use]
+    pub fn get_index_mut(&mut self, key: i64) -> Option<&mut Zval> {
+        unsafe {
+            #[allow(clippy::cast_sign_loss)]
+            zend_hash_index_find(self, key as zend_ulong).as_mut()
+        }
+    }
+
+    /// Attempts to remove a value from the hash table with a string key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to remove from the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(value)` - The value that was removed.
+    /// * `None` - No key was removed, did not exist.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert("test", "hello world");
+    /// assert_eq!(ht.len(), 1);
+    ///
+    /// assert_eq!(ht.remove("test").and_then(|v| v.string()), Some("hello world".to_string()));
+    /// assert_eq!(ht.len(), 0);
+    /// ```
+    pub fn remove<'a, K>(&mut self, key: K) -> Option<Zval>
+    where
+        K: Into<ArrayKey<'a>>,
+    {
+        let key = key.into();
+        let removed = self.get(key.clone()).map(removed_value);
+        let result = match key {
+            ArrayKey::Long(index) => unsafe {
+                #[allow(clippy::cast_sign_loss)]
+                zend_hash_index_del(self, index as zend_ulong)
+            },
+            ArrayKey::String(key) => unsafe {
+                zend_hash_str_del(self, key.as_ptr().cast(), key.len() as _)
+            },
+            ArrayKey::Str(key) => unsafe {
+                zend_hash_str_del(self, key.as_ptr().cast(), key.len() as _)
+            },
+            ArrayKey::ZendString(key) => unsafe { zend_hash_del(self, key.as_ptr().cast_mut()) },
+        };
+
+        if result < 0 { None } else { removed }
+    }
+
+    /// Attempts to remove a value from the hash table with a string key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to remove from the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(value)` - The value that was removed.
+    /// * `None` - No key was removed, did not exist.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push("hello");
+    /// assert_eq!(ht.len(), 1);
+    ///
+    /// assert_eq!(ht.remove_index(0).and_then(|v| v.string()), Some("hello".to_string()));
+    /// assert_eq!(ht.len(), 0);
+    /// ```
+    pub fn remove_index(&mut self, key: i64) -> Option<Zval> {
+        let removed = self.get(key).map(removed_value);
+        let result = unsafe {
+            #[allow(clippy::cast_sign_loss)]
+            zend_hash_index_del(self, key as zend_ulong)
+        };
+
+        if result < 0 { None } else { removed }
+    }
+
+    /// Attempts to insert an item into the hash table, or update if the key
+    /// already exists. Returns nothing in a result if successful.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to insert the value at in the hash table.
+    /// * `value` - The value to insert into the hash table.
+    ///
+    /// # Returns
+    ///
+    /// Returns nothing in a result on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if converting the value into a [`Zval`] failed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert("a", "A");
+    /// ht.insert("b", "B");
+    /// ht.insert("c", "C");
+    /// assert_eq!(ht.len(), 3);
+    /// ```
+    pub fn insert<'a, K, V>(&mut self, key: K, val: V) -> Result<()>
+    where
+        K: Into<ArrayKey<'a>>,
+        V: IntoZval,
+    {
+        let mut val = val.into_zval(false)?;
+        match key.into() {
+            ArrayKey::Long(index) => {
+                unsafe {
+                    #[allow(clippy::cast_sign_loss)]
+                    zend_hash_index_update(self, index as zend_ulong, &raw mut val)
+                };
+            }
+            ArrayKey::String(key) => {
+                unsafe {
+                    // Use raw bytes directly since zend_hash_str_update takes a length.
+                    // This allows keys with embedded null bytes (e.g. PHP property mangling).
+                    zend_hash_str_update(
+                        self,
+                        key.as_str().as_ptr().cast(),
+                        key.len(),
+                        &raw mut val,
+                    )
+                };
+            }
+            ArrayKey::Str(key) => {
+                unsafe {
+                    // Use raw bytes directly since zend_hash_str_update takes a length.
+                    // This allows keys with embedded null bytes (e.g. PHP property mangling).
+                    zend_hash_str_update(self, key.as_ptr().cast(), key.len(), &raw mut val)
+                };
+            }
+            ArrayKey::ZendString(key) => {
+                unsafe {
+                    // zend_hash_update does the addref itself for non-interned strings.
+                    zend_hash_update(self, key.as_ptr().cast_mut(), &raw mut val)
+                };
+            }
+        }
+        val.release();
+        Ok(())
+    }
+
+    /// Inserts an item into the hash table at a specified index, or updates if
+    /// the key already exists. Returns nothing in a result if successful.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The index at which the value should be inserted.
+    /// * `val` - The value to insert into the hash table.
+    ///
+    /// # Returns
+    ///
+    /// Returns nothing in a result on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if converting the value into a [`Zval`] failed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert_at_index(0, "A");
+    /// ht.insert_at_index(5, "B");
+    /// ht.insert_at_index(0, "C"); // notice overriding index 0
+    /// assert_eq!(ht.len(), 2);
+    /// ```
+    pub fn insert_at_index<V>(&mut self, key: i64, val: V) -> Result<()>
+    where
+        V: IntoZval,
+    {
+        let mut val = val.into_zval(false)?;
+        unsafe {
+            #[allow(clippy::cast_sign_loss)]
+            zend_hash_index_update(self, key as zend_ulong, &raw mut val)
+        };
+        val.release();
+        Ok(())
+    }
+
+    /// Pushes an item onto the end of the hash table. Returns a result
+    /// containing nothing if the element was successfully inserted.
+    ///
+    /// # Parameters
+    ///
+    /// * `val` - The value to insert into the hash table.
+    ///
+    /// # Returns
+    ///
+    /// Returns nothing in a result on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if converting the value into a [`Zval`] failed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push("a");
+    /// ht.push("b");
+    /// ht.push("c");
+    /// assert_eq!(ht.len(), 3);
+    /// ```
+    pub fn push<V>(&mut self, val: V) -> Result<()>
+    where
+        V: IntoZval,
+    {
+        let mut val = val.into_zval(false)?;
+        unsafe { zend_hash_next_index_insert(self, &raw mut val) };
+        val.release();
+
+        Ok(())
+    }
+
+    /// Checks if the hashtable only contains numerical keys.
+    ///
+    /// # Returns
+    ///
+    /// True if all keys on the hashtable are numerical.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push(0);
+    /// ht.push(3);
+    /// ht.push(9);
+    /// assert!(ht.has_numerical_keys());
+    ///
+    /// ht.insert("obviously not numerical", 10);
+    /// assert!(!ht.has_numerical_keys());
+    /// ```
+    #[must_use]
+    pub fn has_numerical_keys(&self) -> bool {
+        !self.into_iter().any(|(k, _)| !k.is_long())
+    }
+
+    /// Checks if the hashtable has numerical, sequential keys.
+    ///
+    /// # Returns
+    ///
+    /// True if all keys on the hashtable are numerical and are in sequential
+    /// order (i.e. starting at 0 and not skipping any keys).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of elements in the hashtable exceeds `i64::MAX`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.push(0);
+    /// ht.push(3);
+    /// ht.push(9);
+    /// assert!(ht.has_sequential_keys());
+    ///
+    /// ht.insert_at_index(90, 10);
+    /// assert!(!ht.has_sequential_keys());
+    /// ```
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "a hash table cannot hold more than i64::MAX elements"
+    )]
+    pub fn has_sequential_keys(&self) -> bool {
+        !self
+            .into_iter()
+            .enumerate()
+            .any(|(i, (k, _))| ArrayKey::Long(i64::try_from(i).expect("Integer overflow")) != k)
+    }
+
+    /// Returns an iterator over the values contained inside the hashtable, as
+    /// if it was a set or list.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// for val in ht.values() {
+    ///     dbg!(val);
+    /// }
+    #[inline]
+    #[must_use]
+    pub fn values(&self) -> Values<'_> {
+        Values::new(self)
+    }
+
+    /// Returns an iterator over the key(s) and value contained inside the
+    /// hashtable.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::{ZendHashTable, ArrayKey};
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// for (key, val) in ht.iter() {
+    ///     match &key {
+    ///         ArrayKey::Long(index) => {
+    ///         }
+    ///         ArrayKey::String(key) => {
+    ///         }
+    ///         ArrayKey::Str(key) => {
+    ///         }
+    ///         ArrayKey::ZendString(key) => {
+    ///         }
+    ///     }
+    ///     dbg!(key, val);
+    /// }
+    #[inline]
+    #[must_use]
+    pub fn iter(&self) -> Iter<'_> {
+        self.into_iter()
+    }
+
+    /// Gets the given key's corresponding entry in the hashtable for in-place
+    /// manipulation.
+    ///
+    /// This API is similar to Rust's [`std::collections::hash_map::HashMap::entry`].
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to look up in the hashtable.
+    ///
+    /// # Returns
+    ///
+    /// An `Entry` enum that can be used to insert or modify the value at
+    /// the given key.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// // Insert a default value if the key doesn't exist
+    /// ht.entry("counter").or_insert(0i64);
+    ///
+    /// // Modify the value if it exists
+    /// ht.entry("counter").and_modify(|v| {
+    ///     if let Some(n) = v.long() {
+    ///         v.set_long(n + 1);
+    ///     }
+    /// });
+    ///
+    /// // Use or_insert_with for lazy initialization
+    /// ht.entry("computed").or_insert_with(|| "computed value");
+    ///
+    /// // Works with numeric keys too
+    /// ht.entry(42i64).or_insert("value at index 42");
+    /// ```
+    #[must_use]
+    pub fn entry<'a, 'k, K>(&'a mut self, key: K) -> Entry<'a, 'k>
+    where
+        K: Into<ArrayKey<'k>>,
+    {
+        let key = key.into();
+        if self.has_key(&key) {
+            Entry::Occupied(OccupiedEntry::new(self, key))
+        } else {
+            Entry::Vacant(VacantEntry::new(self, key))
+        }
+    }
+
+    /// Checks if a key exists in the hash table.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - The key to check for in the hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `true` - The key exists in the hash table.
+    /// * `false` - The key does not exist in the hash table.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::{ZendHashTable, ArrayKey};
+    ///
+    /// let mut ht = ZendHashTable::new();
+    ///
+    /// ht.insert("test", "hello world");
+    /// assert!(ht.has_key(&ArrayKey::from("test")));
+    /// assert!(!ht.has_key(&ArrayKey::from("missing")));
+    /// ```
+    #[must_use]
+    pub fn has_key(&self, key: &ArrayKey<'_>) -> bool {
+        match key {
+            ArrayKey::Long(index) => unsafe {
+                #[allow(clippy::cast_sign_loss)]
+                !zend_hash_index_find(self, *index as zend_ulong).is_null()
+            },
+            ArrayKey::String(key) => unsafe {
+                !zend_hash_str_find(self, key.as_ptr().cast(), key.len() as _).is_null()
+            },
+            ArrayKey::Str(key) => unsafe {
+                !zend_hash_str_find(self, key.as_ptr().cast(), key.len() as _).is_null()
+            },
+            ArrayKey::ZendString(key) => unsafe {
+                !zend_hash_find(self, key.as_ptr().cast_mut()).is_null()
+            },
+        }
+    }
+
+    /// Determines whether this hashtable is immutable.
+    ///
+    /// Immutable hashtables are shared and cannot be modified. The primary
+    /// example is the empty immutable shared array returned by
+    /// [`ZendEmptyArray`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendHashTable;
+    ///
+    /// let ht = ZendHashTable::new();
+    /// assert!(!ht.is_immutable());
+    /// ```
+    #[must_use]
+    pub fn is_immutable(&self) -> bool {
+        // SAFETY: Type info is initialized by Zend on array init.
+        let gc_type_info = unsafe { self.gc.u.type_info };
+        let gc_flags = (gc_type_info >> GC_FLAGS_SHIFT) & (GC_FLAGS_MASK >> GC_FLAGS_SHIFT);
+
+        gc_flags & ZvalTypeFlags::Immutable.bits() != 0
+    }
+}
+
+unsafe impl ZBoxable for ZendHashTable {
+    fn free(&mut self) {
+        // Do not attempt to free the immutable shared empty array.
+        if self.is_immutable() {
+            return;
+        }
+        // SAFETY: ZBox has immutable access to `self`.
+        unsafe { zend_array_destroy(self) }
+    }
+}
+
+impl Debug for ZendHashTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.into_iter().map(|(k, v)| (k.to_string(), v)))
+            .finish()
+    }
+}
+
+impl ToOwned for ZendHashTable {
+    type Owned = ZBox<ZendHashTable>;
+
+    fn to_owned(&self) -> Self::Owned {
+        unsafe {
+            // SAFETY: FFI call does not modify `self`, returns a new hashtable.
+            let ptr = zend_array_dup(ptr::from_ref(self).cast_mut());
+
+            ZBox::from_zend_alloc(ptr)
+        }
+    }
+}
+
+impl Default for ZBox<ZendHashTable> {
+    fn default() -> Self {
+        ZendHashTable::new()
+    }
+}
+
+impl Clone for ZBox<ZendHashTable> {
+    fn clone(&self) -> Self {
+        (**self).to_owned()
+    }
+}
+
+impl IntoZval for ZBox<ZendHashTable> {
+    const TYPE: DataType = DataType::Array;
+    const NULLABLE: bool = false;
+
+    fn set_zval(self, zv: &mut Zval, _: bool) -> Result<()> {
+        zv.set_hashtable(self);
+        Ok(())
+    }
+}
+
+impl<'a> FromZval<'a> for &'a ZendHashTable {
+    const TYPE: DataType = DataType::Array;
+
+    fn from_zval(zval: &'a Zval) -> Option<Self> {
+        zval.array()
+    }
+}
+
+impl<'a> FromZvalMut<'a> for &'a mut ZendHashTable {
+    const TYPE: DataType = DataType::Array;
+    const BY_REF: bool = true;
+
+    fn from_zval_mut(zval: &'a mut Zval) -> Option<Self> {
+        zval.array_mut()
+    }
+}
+
+impl<'a> FromZvalMut<'a> for Option<&'a mut ZendHashTable> {
+    const TYPE: DataType = DataType::Array;
+    const NULLABLE: bool = true;
+    const BY_REF: bool = true;
+
+    fn from_zval_mut(zval: &'a mut Zval) -> Option<Self> {
+        if zval.dereference().is_null() {
+            Some(None)
+        } else {
+            zval.array_mut().map(Some)
+        }
+    }
+
+    fn from_missing() -> Option<Self> {
+        Some(None)
+    }
+}
+
+/// Represents an empty, immutable, shared PHP array.
+///
+/// Since PHP 7.3, it's possible for extensions to return a zval backed by
+/// an immutable shared hashtable. This helps avoid redundant hashtable
+/// allocations when returning empty arrays to userland PHP code.
+///
+/// This struct provides a safe way to return an empty array without allocating
+/// a new hashtable. It implements [`IntoZval`] so it can be used as a return
+/// type for PHP functions.
+///
+/// # Safety
+///
+/// Unlike [`ZendHashTable`], this type does not allow any mutation of the
+/// underlying array, as it points to a shared static empty array in PHP's
+/// memory.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ext_php_rs::prelude::*;
+/// use ext_php_rs::types::ZendEmptyArray;
+///
+/// #[php_function]
+/// pub fn get_empty_array() -> ZendEmptyArray {
+///     ZendEmptyArray
+/// }
+/// ```
+///
+/// This is more efficient than returning `Vec::<i32>::new()` or creating
+/// a new `ZendHashTable` when you know the result will be empty.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ZendEmptyArray;
+
+impl ZendEmptyArray {
+    /// Returns a reference to the underlying immutable empty hashtable.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ext_php_rs::types::ZendEmptyArray;
+    ///
+    /// let empty = ZendEmptyArray;
+    /// let ht = empty.as_hashtable();
+    /// assert!(ht.is_empty());
+    /// assert!(ht.is_immutable());
+    /// ```
+    #[must_use]
+    pub fn as_hashtable(&self) -> &ZendHashTable {
+        // SAFETY: zend_empty_array is a static global initialized by PHP.
+        unsafe { &zend_empty_array }
+    }
+}
+
+impl IntoZval for ZendEmptyArray {
+    const TYPE: DataType = DataType::Array;
+    const NULLABLE: bool = false;
+
+    fn set_zval(self, zv: &mut Zval, _persistent: bool) -> Result<()> {
+        // Set the zval to point to the immutable shared empty array.
+        // This mirrors the ZVAL_EMPTY_ARRAY macro in PHP.
+        zv.set_null();
+        zv.u1.type_info = ZvalTypeFlags::Array.bits();
+        zv.value.arr = ptr::from_ref(self.as_hashtable()).cast_mut();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "embed")]
+mod tests {
+    use super::*;
+    use crate::embed::Embed;
+    use crate::types::ZendStr;
+
+    #[test]
+    fn empty_array_set_zval_releases_previous_value() {
+        let refcount = Embed::run(|| {
+            let mut target = Zval::new();
+            target
+                .set_string("not an interned string value", false)
+                .ok()?;
+            let other = target.shallow_clone();
+            ZendEmptyArray.set_zval(&mut target, false).ok()?;
+            other.zend_str().map(|s| s.gc.refcount)
+        });
+        assert_eq!(refcount, Some(1));
+    }
+
+    #[test]
+    fn test_has_key_string() {
+        Embed::run(|| {
+            let mut ht = ZendHashTable::new();
+            let _ = ht.insert("test", "value");
+
+            assert!(ht.has_key(&ArrayKey::from("test")));
+            assert!(!ht.has_key(&ArrayKey::from("missing")));
+        });
+    }
+
+    #[test]
+    fn test_has_key_long() {
+        Embed::run(|| {
+            let mut ht = ZendHashTable::new();
+            let _ = ht.push(42i64);
+
+            assert!(ht.has_key(&ArrayKey::Long(0)));
+            assert!(!ht.has_key(&ArrayKey::Long(1)));
+        });
+    }
+
+    #[test]
+    fn test_has_key_str_ref() {
+        Embed::run(|| {
+            let mut ht = ZendHashTable::new();
+            let _ = ht.insert("hello", "world");
+
+            let key = ArrayKey::Str("hello");
+            assert!(ht.has_key(&key));
+            // Key is still usable after has_key (no clone needed)
+            assert!(ht.has_key(&key));
+
+            assert!(!ht.has_key(&ArrayKey::Str("missing")));
+        });
+    }
+
+    #[test]
+    fn test_has_key_zend_string() {
+        Embed::run(|| {
+            let mut ht = ZendHashTable::new();
+            let key = ZendStr::new("hello", false);
+
+            let _ = ht.insert(&key, "world");
+            assert!(ht.has_key(&ArrayKey::ZendString(&key)));
+        });
+    }
+
+    #[test]
+    fn test_zend_string_numeric_key_normalizes_to_long() {
+        Embed::run(|| {
+            let mut ht = ZendHashTable::new();
+            let numeric_key = ZendStr::new("42", false);
+
+            let _ = ht.insert(&numeric_key, "value");
+
+            assert_eq!(ht.get_index(42).and_then(|v| v.str()), Some("value"));
+            assert_eq!(ht.get("42").and_then(|v| v.str()), Some("value"));
+            assert_eq!(ht.get(&numeric_key).and_then(|v| v.str()), Some("value"));
+            assert!(ht.has_key(&ArrayKey::from(&numeric_key)));
+        });
+    }
+}

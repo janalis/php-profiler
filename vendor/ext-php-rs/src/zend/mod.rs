@@ -1,0 +1,196 @@
+//! Types used to interact with the Zend engine.
+
+mod _type;
+mod bailout_guard;
+pub mod ce;
+mod class;
+#[cfg(feature = "observer")]
+pub(crate) mod error_observer;
+mod ex;
+#[cfg(feature = "observer")]
+pub(crate) mod exception_observer;
+mod function;
+mod globals;
+mod handlers;
+mod headers;
+mod ini_entry_def;
+mod linked_list;
+mod module;
+pub(crate) mod module_globals;
+#[cfg(feature = "observer")]
+pub(crate) mod observer;
+mod output;
+pub(crate) mod sapi_activate;
+mod streams;
+mod try_catch;
+#[cfg(feature = "observer")]
+pub(crate) mod zend_extension;
+
+use crate::{
+    error::Result,
+    ffi::{php_output_write, php_printf, sapi_module},
+};
+use std::ffi::CString;
+use std::os::raw::c_char;
+
+pub use _type::ZendType;
+pub use bailout_guard::BailoutGuard;
+pub use class::ClassEntry;
+#[cfg(feature = "observer")]
+pub use error_observer::{BacktraceFrame, ErrorInfo, ErrorObserver, ErrorType};
+pub use ex::ExecuteData;
+#[cfg(feature = "observer")]
+pub use exception_observer::{ExceptionInfo, ExceptionObserver};
+pub use function::Function;
+pub use function::FunctionEntry;
+pub(crate) use globals::CompilerGlobals;
+pub use globals::ExecutorGlobals;
+pub use globals::FileGlobals;
+pub use globals::ProcessGlobals;
+pub use globals::SapiGlobals;
+pub use globals::SapiHeader;
+pub use globals::SapiHeaders;
+pub use globals::SapiModule;
+pub use globals::SapiRequestInfo;
+pub use handlers::ZendObjectHandlers;
+pub use headers::{add_header, remove_all_headers, remove_header, set_header, set_response_code};
+pub use ini_entry_def::{IniEntryDef, IniEntryDefs};
+pub use linked_list::ZendLinkedList;
+pub use module::{ModuleAllocations, ModuleEntry, StaticModuleEntry};
+pub use module_globals::{ModuleGlobal, ModuleGlobals};
+#[cfg(feature = "observer")]
+pub use observer::{FcallInfo, FcallObserver};
+pub use output::{OutputHandlerFlags, OutputOp, start_output_handler};
+pub use streams::*;
+pub(crate) use try_catch::catch_panic;
+pub use try_catch::{CatchError, bailout, run_handler, try_catch, try_catch_first};
+#[cfg(feature = "embed")]
+pub(crate) use try_catch::{CatchFrame, panic_wrapper};
+#[cfg(feature = "observer")]
+pub use zend_extension::{ZendExtensionBuilder, ZendExtensionHandler};
+
+/// Register a `zend_extension` with the PHP engine.
+///
+/// # Safety
+///
+/// * Must be called during `MINIT`.
+/// * The struct's string fields (`name`, `version`, ...) must point at memory
+///   that lives for the process lifetime. PHP copies the struct into its
+///   internal list but keeps those `*const c_char` pointers.
+#[cfg(feature = "observer")]
+pub(crate) unsafe fn register_extension(ext: *mut crate::ffi::zend_extension) {
+    unsafe {
+        crate::ffi::zend_register_extension(ext, std::ptr::null_mut());
+    }
+}
+
+// Used as the format string for `php_printf`.
+const FORMAT_STR: &[u8] = b"%s\0";
+
+/// Prints to stdout using the `php_printf` function.
+///
+/// Also see the [`php_print`] and [`php_println`] macros.
+///
+/// # Arguments
+///
+/// * message - The message to print to stdout.
+///
+/// # Errors
+///
+/// * If the message could not be converted to a [`CString`].
+pub fn printf(message: &str) -> Result<()> {
+    let message = CString::new(message)?;
+    unsafe {
+        php_printf(FORMAT_STR.as_ptr().cast(), message.as_ptr());
+    };
+    Ok(())
+}
+
+/// Writes binary data to PHP's output stream (stdout).
+///
+/// Unlike [`printf`], this function is binary-safe and can handle data
+/// containing NUL bytes. It uses the SAPI module's `ub_write` function
+/// which accepts a pointer and length, allowing arbitrary binary data.
+///
+/// Also see the [`php_write!`] macro.
+///
+/// # Arguments
+///
+/// * `data` - The binary data to write to stdout.
+///
+/// # Returns
+///
+/// The number of bytes written.
+///
+/// # Errors
+///
+/// Returns [`crate::error::Error::SapiWriteUnavailable`] if the SAPI's
+/// `ub_write` function is not available.
+///
+/// # Example
+///
+/// ```ignore
+/// use ext_php_rs::zend::write;
+///
+/// // Write binary data including NUL bytes
+/// let data = b"Hello\x00World";
+/// write(data).expect("Failed to write data");
+/// ```
+pub fn write(data: &[u8]) -> Result<usize> {
+    unsafe {
+        if let Some(ub_write) = sapi_module.ub_write {
+            Ok(ub_write(data.as_ptr().cast::<c_char>(), data.len()))
+        } else {
+            Err(crate::error::Error::SapiWriteUnavailable)
+        }
+    }
+}
+
+/// Writes binary data to PHP's output stream with output buffering support.
+///
+/// This function is binary-safe (can handle NUL bytes) AND respects PHP's
+/// output buffering (`ob_start()`). Use this when you need both binary-safe
+/// output and output buffering compatibility.
+///
+/// # Arguments
+///
+/// * `data` - The binary data to write.
+///
+/// # Returns
+///
+/// The number of bytes written.
+///
+/// # Comparison
+///
+/// | Function | Binary-safe | Output Buffering |
+/// |----------|-------------|------------------|
+/// | [`printf`] | No | Yes |
+/// | [`write()`] | Yes | No (unbuffered) |
+/// | [`output_write`] | Yes | Yes |
+///
+/// # Example
+///
+/// ```ignore
+/// use ext_php_rs::zend::output_write;
+///
+/// // Binary data that will be captured by ob_start()
+/// let data = b"Hello\x00World";
+/// output_write(data);
+/// ```
+#[inline]
+#[must_use]
+pub fn output_write(data: &[u8]) -> usize {
+    unsafe { php_output_write(data.as_ptr().cast::<c_char>(), data.len()) }
+}
+
+/// Get the name of the SAPI module.
+///
+/// Returns `None` if the module name is null or not valid UTF-8.
+#[must_use]
+pub fn php_sapi_name() -> Option<String> {
+    if unsafe { sapi_module.name }.is_null() {
+        return None;
+    }
+    let c_str = unsafe { std::ffi::CStr::from_ptr(sapi_module.name) };
+    c_str.to_str().ok().map(ToString::to_string)
+}

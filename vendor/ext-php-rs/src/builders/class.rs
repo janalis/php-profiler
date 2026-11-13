@@ -1,0 +1,772 @@
+use std::{
+    ffi::CString,
+    mem::{ManuallyDrop, MaybeUninit},
+    ptr,
+    rc::Rc,
+};
+
+use crate::{
+    args::ArgInfoTables,
+    builders::{FunctionBuilder, function::free_registered_entries},
+    class::{ClassEntryInfo, ConstructorMeta, ConstructorResult, RegisteredClass},
+    convert::{IntoZval, IntoZvalDyn},
+    describe::DocComments,
+    error::{Error, Result},
+    exception::PhpException,
+    ffi::{
+        zend_declare_class_constant_ex, zend_declare_property, zend_do_implement_interface,
+        zend_hash_str_find_ptr_lc, zend_register_internal_class_ex,
+        zend_register_internal_interface,
+    },
+    flags::{ClassFlags, ConstantFlags, DataType, MethodFlags, PropertyFlags},
+    types::{ZendClassObject, ZendObject, ZendStr, Zval},
+    zend::{ClassEntry, CompilerGlobals, ExecuteData, ExecutorGlobals, FunctionEntry},
+    zend_fastcall,
+};
+
+/// A constant entry: (name, `value_closure`, docs, `stub_value`, flags)
+type ConstantEntry = (
+    String,
+    Box<dyn FnOnce() -> Result<Zval>>,
+    DocComments,
+    String,
+    ConstantFlags,
+);
+type PropertyDefault = Option<Box<dyn FnOnce() -> Result<Zval>>>;
+
+/// Metadata for a class property to be registered with PHP.
+pub struct ClassProperty {
+    /// Name of the property.
+    pub name: String,
+    /// Visibility and modifier flags.
+    pub flags: PropertyFlags,
+    /// Optional default value closure.
+    pub default: PropertyDefault,
+    /// Documentation comments.
+    pub docs: DocComments,
+    /// PHP type for stub generation.
+    pub ty: Option<DataType>,
+    /// Whether the property accepts null.
+    pub nullable: bool,
+    /// Whether the property is read-only (getter without setter).
+    pub readonly: bool,
+    /// PHP stub representation of the default value (e.g. `"null"`, `"42"`).
+    pub default_stub: Option<String>,
+}
+
+/// Returns the first name that repeats an earlier one. The engine keys
+/// method, function and class tables by ASCII-lowercased name, and constant and
+/// property tables by the exact name.
+pub(crate) fn first_duplicate<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    fold_ascii_case: bool,
+) -> Option<&'a str> {
+    let names: Vec<&str> = names.into_iter().collect();
+    names.iter().enumerate().find_map(|(i, name)| {
+        names[..i]
+            .iter()
+            .any(|earlier| {
+                if fold_ascii_case {
+                    earlier.eq_ignore_ascii_case(name)
+                } else {
+                    earlier == name
+                }
+            })
+            .then_some(*name)
+    })
+}
+
+/// Returns an error when the engine already holds a class, interface or enum
+/// named `name`, ignoring ASCII case. `do_register_internal_class` would
+/// silently replace it.
+///
+/// `EG(class_table)` is only set at request startup, so this reads
+/// `CG(class_table)`, which holds every class registered so far.
+pub(crate) fn ensure_class_name_free(name: &str) -> Result<()> {
+    let class_table = CompilerGlobals::get().class_table;
+    if class_table.is_null() {
+        return Ok(());
+    }
+    // SAFETY: `class_table` is the engine's live class table and `name` is
+    // valid for `name.len()` bytes; the lookup copies it before lowercasing.
+    let found = unsafe { zend_hash_str_find_ptr_lc(class_table, name.as_ptr().cast(), name.len()) };
+    if found.is_null() {
+        Ok(())
+    } else {
+        Err(Error::DuplicateClass {
+            class: name.to_owned(),
+        })
+    }
+}
+
+/// Builder for registering a class in PHP.
+#[must_use]
+pub struct ClassBuilder {
+    pub(crate) name: String,
+    ce: ClassEntry,
+    pub(crate) extends: Option<ClassEntryInfo>,
+    pub(crate) interfaces: Vec<ClassEntryInfo>,
+    pub(crate) methods: Vec<(FunctionBuilder<'static>, MethodFlags)>,
+    object_override: Option<unsafe extern "C" fn(class_type: *mut ClassEntry) -> *mut ZendObject>,
+    pub(crate) properties: Vec<ClassProperty>,
+    pub(crate) constants: Vec<ConstantEntry>,
+    register: Option<fn(&'static mut ClassEntry, ArgInfoTables)>,
+    pub(crate) docs: DocComments,
+}
+
+impl ClassBuilder {
+    /// Creates a new class builder, used to build classes
+    /// to be exported to PHP.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - The name of the class.
+    pub fn new<T: Into<String>>(name: T) -> Self {
+        Self {
+            name: name.into(),
+            // SAFETY: A zeroed class entry is in an initialized state, as it is a raw C type
+            // whose fields do not have a drop implementation.
+            ce: unsafe { MaybeUninit::zeroed().assume_init() },
+            extends: None,
+            interfaces: vec![],
+            methods: vec![],
+            object_override: None,
+            properties: vec![],
+            constants: vec![],
+            register: None,
+            docs: &[],
+        }
+    }
+
+    /// Return PHP class flags
+    #[must_use]
+    pub fn get_flags(&self) -> u32 {
+        self.ce.ce_flags
+    }
+
+    /// Sets the class builder to extend another class.
+    ///
+    /// # Parameters
+    ///
+    /// * `parent` - The parent class to extend.
+    pub fn extends(mut self, parent: ClassEntryInfo) -> Self {
+        self.extends = Some(parent);
+        self
+    }
+
+    /// Implements an interface on the class.
+    ///
+    /// # Parameters
+    ///
+    /// * `interface` - Interface to implement on the class.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the given class entry `interface` is not an interface.
+    pub fn implements(mut self, interface: ClassEntryInfo) -> Self {
+        self.interfaces.push(interface);
+        self
+    }
+
+    /// Adds a method to the class.
+    ///
+    /// # Parameters
+    ///
+    /// * `func` - The function builder to add to the class.
+    /// * `flags` - Flags relating to the function. See [`MethodFlags`].
+    pub fn method(mut self, func: FunctionBuilder<'static>, flags: MethodFlags) -> Self {
+        self.methods.push((func, flags));
+        self
+    }
+
+    /// Adds a property to the class.
+    ///
+    /// # Parameters
+    ///
+    /// * `prop` - The property metadata to add to the class.
+    pub fn property(mut self, prop: ClassProperty) -> Self {
+        self.properties.push(prop);
+        self
+    }
+
+    /// Adds a constant to the class. The type of the constant is defined by the
+    /// type of the given default.
+    ///
+    /// Returns a result containing the class builder if the constant was
+    /// successfully added.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - The name of the constant to add to the class.
+    /// * `value` - The value of the constant.
+    /// * `docs` - Documentation comments for the constant.
+    /// * `flags` - Visibility of the constant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` cannot be converted into a [`Zval`].
+    pub fn constant<T: Into<String>>(
+        mut self,
+        name: T,
+        value: impl IntoZval + 'static,
+        docs: DocComments,
+        flags: ConstantFlags,
+    ) -> Result<Self> {
+        let zval = value.into_zval(true)?;
+        let stub = crate::convert::zval_to_stub(&zval);
+        self.constants
+            .push((name.into(), Box::new(|| Ok(zval)), docs, stub, flags));
+        Ok(self)
+    }
+
+    /// Adds a constant to the class from a `dyn` object. The type of the
+    /// constant is defined by the type of the value.
+    ///
+    /// Returns a result containing the class builder if the constant was
+    /// successfully added.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - The name of the constant to add to the class.
+    /// * `value` - The value of the constant.
+    /// * `docs` - Documentation comments for the constant.
+    /// * `flags` - Visibility of the constant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` cannot be converted into a [`Zval`].
+    pub fn dyn_constant<T: Into<String>>(
+        mut self,
+        name: T,
+        value: &'static dyn IntoZvalDyn,
+        docs: DocComments,
+        flags: ConstantFlags,
+    ) -> Result<Self> {
+        let stub = value.stub_value();
+        let value = Rc::new(value);
+        self.constants.push((
+            name.into(),
+            Box::new(move || value.as_zval(true)),
+            docs,
+            stub,
+            flags,
+        ));
+        Ok(self)
+    }
+
+    /// Sets the flags for the class.
+    ///
+    /// # Parameters
+    ///
+    /// * `flags` - Flags relating to the class. See [`ClassFlags`].
+    pub fn flags(mut self, flags: ClassFlags) -> Self {
+        self.ce.ce_flags = flags.bits();
+        self
+    }
+
+    /// Overrides the creation of the Zend object which will represent an
+    /// instance of this class.
+    ///
+    /// # Parameters
+    ///
+    /// * `T` - The type which will override the Zend object. Must implement
+    ///   [`RegisteredClass`] which can be derived using the
+    ///   [`php_class`](crate::php_class) attribute macro.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the class name associated with `T` is not the same as the
+    /// class name specified when creating the builder.
+    pub fn object_override<T: RegisteredClass>(mut self) -> Self {
+        extern "C" fn create_object<T: RegisteredClass>(ce: *mut ClassEntry) -> *mut ZendObject {
+            // Try to initialize with a default instance if available.
+            // This is critical for exception classes that extend \Exception, because
+            // PHP's zend_throw_exception_ex creates objects via create_object without
+            // calling the constructor, then immediately accesses properties.
+            // Without default initialization, accessing properties on uninitialized
+            // objects would panic.
+            if let Some(instance) = T::default_init() {
+                let obj = ZendClassObject::<T>::new(instance).into_raw();
+                // SAFETY: `into_raw` yields a valid, exclusively owned object that
+                // the engine takes over.
+                return unsafe { (*obj).get_mut_zend_obj() };
+            }
+
+            // SAFETY: After calling this function, PHP will always call the constructor
+            // defined below, which assumes that the object is uninitialized.
+            let obj = unsafe { ZendClassObject::<T>::new_uninit(ce.as_ref()) }.into_raw();
+            // SAFETY: same ownership transfer as above.
+            unsafe { (*obj).get_mut_zend_obj() }
+        }
+
+        zend_fastcall! {
+            extern fn constructor<T: RegisteredClass>(ex: &mut ExecuteData, _: &mut Zval) {
+                crate::zend::run_handler(std::panic::AssertUnwindSafe(|| {
+                    let Some(ConstructorMeta { constructor, .. }) = T::constructor() else {
+                        PhpException::from_message("You cannot instantiate this class from PHP.".into())
+                            .throw();
+                        return;
+                    };
+
+                    let this = match constructor(ex) {
+                        ConstructorResult::Ok(this) => this,
+                        ConstructorResult::Exception(e) => {
+                            e.throw();
+                            return;
+                        }
+                        ConstructorResult::ArgError => return,
+                    };
+
+                    // Use get_object_uninit because the Rust backing is not yet initialized.
+                    // We need access to the ZendClassObject to call initialize() on it.
+                    let Some(this_obj) = ex.get_object_uninit::<T>() else {
+                        PhpException::from_message("Failed to retrieve reference to `this` object.".into())
+                            .throw();
+                        return;
+                    };
+
+                    this_obj.initialize(this);
+                }));
+            }
+        }
+
+        debug_assert_eq!(
+            self.name.as_str(),
+            T::CLASS_NAME,
+            "Class name in builder does not match class name in `impl RegisteredClass`."
+        );
+        self.object_override = Some(create_object::<T>);
+        let is_interface = T::FLAGS.contains(ClassFlags::Interface);
+
+        // For interfaces: only add __construct if explicitly declared
+        // For classes: always add __construct (PHP needs it for object creation)
+        if let Some(ConstructorMeta {
+            build_fn, flags, ..
+        }) = T::constructor()
+        {
+            let func = if is_interface {
+                FunctionBuilder::new_abstract("__construct")
+            } else {
+                FunctionBuilder::new("__construct", constructor::<T>)
+            };
+            let visibility = flags.unwrap_or(MethodFlags::Public);
+            self.method(build_fn(func), visibility)
+        } else if is_interface {
+            // Don't add default constructor for interfaces
+            self
+        } else {
+            // Add default constructor for classes
+            let func = FunctionBuilder::new("__construct", constructor::<T>);
+            self.method(func, MethodFlags::Public)
+        }
+    }
+
+    /// Function to register the class with PHP, called once the class is built.
+    ///
+    /// It receives the registered class entry and the argument info tables of
+    /// the class's methods. `zend_register_functions` borrows those tables for
+    /// the life of the process, so the function must park them somewhere that
+    /// lives that long — normally the class's own
+    /// [`ClassMetadata`](crate::class::ClassMetadata) static:
+    ///
+    /// ```rust,ignore
+    /// .registration(|ce, arg_info| {
+    ///     META.set_ce(ce);
+    ///     META.set_arg_info(arg_info);
+    /// })
+    /// ```
+    ///
+    /// # Parameters
+    ///
+    /// * `register` - The function to call to register the class.
+    pub fn registration(mut self, register: fn(&'static mut ClassEntry, ArgInfoTables)) -> Self {
+        self.register = Some(register);
+        self
+    }
+
+    /// Sets the documentation for the class.
+    ///
+    /// # Parameters
+    ///
+    /// * `docs` - The documentation comments for the class.
+    pub fn docs(mut self, docs: DocComments) -> Self {
+        self.docs = docs;
+        self
+    }
+
+    /// Checks that no two properties, methods or constants of the class share
+    /// a PHP name. Methods are compared ignoring ASCII case, like the engine.
+    fn validate(&self) -> Result<()> {
+        if let Some(name) = first_duplicate(self.properties.iter().map(|p| p.name.as_str()), false)
+        {
+            return Err(Error::DuplicateProperty {
+                property: format!("{}::${name}", self.name),
+            });
+        }
+        if let Some(name) = first_duplicate(self.methods.iter().map(|(m, _)| m.name.as_str()), true)
+        {
+            return Err(Error::DuplicateMethod {
+                method: format!("{}::{name}", self.name),
+            });
+        }
+        if let Some(name) = first_duplicate(self.constants.iter().map(|c| c.0.as_str()), false) {
+            return Err(Error::DuplicateConstant {
+                constant: format!("{}::{name}", self.name),
+            });
+        }
+        Ok(())
+    }
+
+    /// Builds and registers the class.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::DuplicateProperty`], [`Error::DuplicateMethod`] or
+    ///   [`Error::DuplicateConstant`] - If two members share a PHP name.
+    /// * [`Error::DuplicateClass`] - If a class with this name, ignoring ASCII
+    ///   case, is already registered.
+    /// * [`Error::InvalidPointer`] - If the class could not be registered.
+    /// * [`Error::InvalidCString`] - If the class name is not a valid C string.
+    /// * [`Error::IntegerOverflow`] - If the property flags are not valid.
+    /// * If a method or property could not be built.
+    ///
+    /// # Panics
+    ///
+    /// * If called outside a module startup (MINIT) function.
+    /// * If no registration function was provided.
+    pub fn register(mut self) -> Result<()> {
+        assert!(
+            !ExecutorGlobals::get().current_module.is_null(),
+            "Classes can only be registered from a module startup (MINIT) function: \
+             `do_register_internal_class` dereferences `EG(current_module)`."
+        );
+        self.validate()?;
+        ensure_class_name_free(&self.name)?;
+
+        self.ce.name = ZendStr::new_interned(&self.name, true).into_raw();
+
+        let mut arg_info = Vec::with_capacity(self.methods.len());
+        let mut methods = Vec::with_capacity(self.methods.len() + 1);
+        for (method, flags) in self.methods {
+            let (mut entry, args) = method.build()?;
+            entry.add_flags(flags);
+            methods.push(entry);
+            arg_info.push(args);
+        }
+
+        // The engine keeps `zend_internal_function.arg_info` pointing into these
+        // for the life of the process, so `register` parks them. Holding them in
+        // a `ManuallyDrop` keeps them alive across registration, which reads
+        // them, without a second owner. Every fallible step below runs after the
+        // class entry is in `CG(class_table)`, so an error must leak the tables
+        // rather than dangle the functions the engine already holds.
+        let arg_info = ManuallyDrop::new(arg_info.into_boxed_slice());
+
+        methods.push(FunctionEntry::end());
+        let entries = Box::into_raw(methods.into_boxed_slice());
+        self.ce.info.internal.builtin_functions = entries.cast::<FunctionEntry>().cast_const();
+
+        let class = if self.ce.flags().contains(ClassFlags::Interface) {
+            unsafe { zend_register_internal_interface(&raw mut self.ce) }
+        } else {
+            // Resolved here and not before the branch: the getter is usually
+            // `T::get_metadata().ce()`, which panics when the parent has not been
+            // registered, and `zend_register_internal_interface` takes no parent.
+            let parent = match self.extends {
+                Some((ptr, _)) => ptr::from_ref(ptr()).cast_mut(),
+                None => std::ptr::null_mut(),
+            };
+            unsafe { zend_register_internal_class_ex(&raw mut self.ce, parent) }
+        };
+
+        // SAFETY: `do_register_internal_class` has interned every `fname` and read
+        // `builtin_functions` for the last time, so the table is dead.
+        unsafe { free_registered_entries(entries) };
+
+        let class = unsafe { class.as_mut() }.ok_or(Error::InvalidPointer)?;
+        class.info.internal.builtin_functions = ptr::null();
+
+        // disable serialization if the class has an associated object
+        if self.object_override.is_some() {
+            cfg_if::cfg_if! {
+                if #[cfg(php81)] {
+                    class.ce_flags |= ClassFlags::NotSerializable.bits();
+                } else {
+                    class.serialize = Some(crate::ffi::zend_class_serialize_deny);
+                    class.unserialize = Some(crate::ffi::zend_class_unserialize_deny);
+                }
+            }
+        }
+
+        for (iface, _) in self.interfaces {
+            let interface = iface();
+            assert!(
+                interface.is_interface(),
+                "Given class entry was not an interface."
+            );
+
+            unsafe { zend_do_implement_interface(class, ptr::from_ref(interface).cast_mut()) };
+        }
+
+        for prop in self.properties {
+            let mut default_zval = match prop.default {
+                Some(f) => f()?,
+                None => Zval::new(),
+            };
+            unsafe {
+                zend_declare_property(
+                    class,
+                    CString::new(prop.name.as_str())?.as_ptr(),
+                    prop.name.len() as _,
+                    &raw mut default_zval,
+                    prop.flags.bits().try_into()?,
+                );
+            }
+        }
+
+        for (name, value, _, _, flags) in self.constants {
+            // The constants table keeps the interned key; releasing an interned
+            // string is a no-op, so dropping the `ZBox` afterwards is sound.
+            let name = ZendStr::new_interned(&name, true);
+            // `zend_declare_class_constant_ex` takes the payload with
+            // `ZVAL_COPY_VALUE` and no incref and, unlike
+            // `zend_declare_typed_property`, does not reject refcounted values, so
+            // the constants table owns it and the `Zval` must not run its destructor.
+            let mut value = ManuallyDrop::new(value()?);
+            unsafe {
+                zend_declare_class_constant_ex(
+                    class,
+                    name.as_ptr().cast_mut(),
+                    &raw mut *value,
+                    flags.bits().try_into()?,
+                    ptr::null_mut(),
+                );
+            };
+        }
+
+        if let Some(object_override) = self.object_override {
+            class.__bindgen_anon_2.create_object = Some(object_override);
+        }
+
+        if let Some(register) = self.register {
+            register(class, ManuallyDrop::into_inner(arg_info));
+        } else {
+            panic!("Class {} was not registered.", self.name);
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test::test_function;
+
+    use super::*;
+
+    #[test]
+    #[allow(unpredictable_function_pointer_comparisons)]
+    fn test_new() {
+        let class = ClassBuilder::new("Foo");
+        assert_eq!(class.name, "Foo");
+        assert_eq!(class.extends, None);
+        assert_eq!(class.interfaces, vec![]);
+        assert_eq!(class.methods.len(), 0);
+        assert_eq!(class.object_override, None);
+        assert!(class.properties.is_empty());
+        assert_eq!(class.constants.len(), 0);
+        assert_eq!(class.register, None);
+        assert_eq!(class.docs, &[] as DocComments);
+    }
+
+    #[test]
+    fn test_extends() {
+        let extends: ClassEntryInfo = (|| todo!(), "Bar");
+        let class = ClassBuilder::new("Foo").extends(extends);
+        assert_eq!(class.extends, Some(extends));
+    }
+
+    #[test]
+    fn test_implements() {
+        let implements: ClassEntryInfo = (|| todo!(), "Bar");
+        let class = ClassBuilder::new("Foo").implements(implements);
+        assert_eq!(class.interfaces, vec![implements]);
+    }
+
+    #[test]
+    fn test_method() {
+        let method = FunctionBuilder::new("foo", test_function);
+        let class = ClassBuilder::new("Foo").method(method, MethodFlags::Public);
+        assert_eq!(class.methods.len(), 1);
+    }
+
+    #[test]
+    fn test_property() {
+        let class = ClassBuilder::new("Foo").property(ClassProperty {
+            name: "bar".into(),
+            flags: PropertyFlags::Public,
+            default: None,
+            docs: &["Doc 1"],
+            ty: Some(DataType::String),
+            nullable: false,
+            readonly: false,
+            default_stub: None,
+        });
+        assert_eq!(class.properties.len(), 1);
+        assert_eq!(class.properties[0].name, "bar");
+        assert_eq!(class.properties[0].flags, PropertyFlags::Public);
+        assert!(class.properties[0].default.is_none());
+        assert_eq!(class.properties[0].docs, &["Doc 1"] as DocComments);
+        assert_eq!(class.properties[0].ty, Some(DataType::String));
+    }
+
+    fn named_property(name: &str) -> ClassProperty {
+        ClassProperty {
+            name: name.into(),
+            flags: PropertyFlags::Public,
+            default: None,
+            docs: &[],
+            ty: None,
+            nullable: false,
+            readonly: false,
+            default_stub: None,
+        }
+    }
+
+    fn with_constant(mut class: ClassBuilder, name: &str) -> ClassBuilder {
+        class.constants.push((
+            name.into(),
+            Box::new(|| Err(Error::InvalidPointer)),
+            &[],
+            String::new(),
+            ConstantFlags::Public,
+        ));
+        class
+    }
+
+    #[test]
+    fn first_duplicate_folds_ascii_case_only_when_asked() {
+        assert_eq!(first_duplicate(["a", "b", "a"], false), Some("a"));
+        assert_eq!(first_duplicate(["a", "B", "b"], false), None);
+        assert_eq!(first_duplicate(["a", "B", "b"], true), Some("b"));
+        assert_eq!(first_duplicate(["ä", "Ä"], true), None);
+        assert_eq!(first_duplicate([], true), None);
+    }
+
+    #[test]
+    fn validate_rejects_a_repeated_property() {
+        let mut class = ClassBuilder::new("Foo");
+        class.properties = vec![named_property("a"), named_property("a")];
+        assert!(matches!(
+            class.validate(),
+            Err(Error::DuplicateProperty { property }) if property == "Foo::$a"
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_methods_that_differ_only_by_case() {
+        let class = ClassBuilder::new("Foo")
+            .method(
+                FunctionBuilder::new("run", test_function),
+                MethodFlags::Public,
+            )
+            .method(
+                FunctionBuilder::new("RUN", test_function),
+                MethodFlags::Static,
+            );
+        assert!(matches!(
+            class.validate(),
+            Err(Error::DuplicateMethod { method }) if method == "Foo::RUN"
+        ));
+    }
+
+    #[test]
+    fn validate_compares_constants_exactly() {
+        let class = with_constant(with_constant(ClassBuilder::new("Foo"), "A"), "a");
+        assert!(class.validate().is_ok());
+        let class = with_constant(class, "A");
+        assert!(matches!(
+            class.validate(),
+            Err(Error::DuplicateConstant { constant }) if constant == "Foo::A"
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn class_names_already_in_the_class_table_are_taken() {
+        let ran = crate::embed::Embed::run(|| {
+            assert!(matches!(
+                ensure_class_name_free("STDCLASS"),
+                Err(Error::DuplicateClass { class }) if class == "STDCLASS"
+            ));
+            assert!(ensure_class_name_free("ExtPhpRsNoSuchClass").is_ok());
+            true
+        });
+        assert!(ran);
+    }
+
+    #[test]
+    fn validate_accepts_distinct_members() {
+        let mut class = ClassBuilder::new("Foo")
+            .method(
+                FunctionBuilder::new("run", test_function),
+                MethodFlags::Public,
+            )
+            .method(
+                FunctionBuilder::new("stop", test_function),
+                MethodFlags::Public,
+            );
+        class.properties = vec![named_property("a"), named_property("b")];
+        assert!(with_constant(class, "A").validate().is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_constant() {
+        let class = ClassBuilder::new("Foo")
+            .constant("bar", 42, &["Doc 1"], ConstantFlags::Public)
+            .expect("Failed to create constant");
+        assert_eq!(class.constants.len(), 1);
+        assert_eq!(class.constants[0].0, "bar");
+        assert_eq!(class.constants[0].2, &["Doc 1"] as DocComments);
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_dyn_constant() {
+        let class = ClassBuilder::new("Foo")
+            .dyn_constant("bar", &42, &["Doc 1"], ConstantFlags::Public)
+            .expect("Failed to create constant");
+        assert_eq!(class.constants.len(), 1);
+        assert_eq!(class.constants[0].0, "bar");
+        assert_eq!(class.constants[0].2, &["Doc 1"] as DocComments);
+    }
+
+    #[test]
+    fn test_flags() {
+        let class = ClassBuilder::new("Foo").flags(ClassFlags::Abstract);
+        assert_eq!(class.ce.ce_flags, ClassFlags::Abstract.bits());
+    }
+
+    #[test]
+    fn test_registration() {
+        let class = ClassBuilder::new("Foo").registration(|_, _| {});
+        assert!(class.register.is_some());
+    }
+
+    #[test]
+    fn test_registration_interface() {
+        let class = ClassBuilder::new("Foo")
+            .flags(ClassFlags::Interface)
+            .registration(|_, _| {});
+        assert!(class.register.is_some());
+    }
+
+    #[test]
+    fn test_docs() {
+        let class = ClassBuilder::new("Foo").docs(&["Doc 1"]);
+        assert_eq!(class.docs, &["Doc 1"] as DocComments);
+    }
+
+    // TODO: Test the register function
+}

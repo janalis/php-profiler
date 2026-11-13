@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+/.github export-ignore
+/target export-ignore
+/mutants.out export-ignore

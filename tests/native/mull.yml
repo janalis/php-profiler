@@ -1,0 +1,5 @@
+# Only first-party C. Zend headers and Rust crates have independent gates.
+includePaths:
+  - 'crates/php-profiler/src/bridge.c$'
+mutators:
+  - cxx_all

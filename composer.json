@@ -1,0 +1,13 @@
+{
+  "name": "janalis/php-profiler",
+  "description": "Local PHP profiler implemented in Rust",
+  "type": "php-ext",
+  "license": "MIT",
+  "require": {"php": ">=8.3 <8.6"},
+  "php-ext": {
+    "extension-name": "php_profiler",
+    "build-path": "packaging",
+    "support-zts": true,
+    "support-nts": true
+  }
+}

@@ -1,0 +1,624 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Local PHP profiler report v2 with wall-safepoint observations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "elapsed_wall_ns",
+    "thread_cpu_ns",
+    "observed_boundary_peak_bytes",
+    "dropped_calls",
+    "unmatched_exits",
+    "clock_regressions",
+    "memory_delta_bytes",
+    "functions",
+    "edges",
+    "timeline",
+    "limitations",
+    "metric_provenance",
+    "capabilities",
+    "operations",
+    "timeline_enabled",
+    "termination_reason",
+    "runtime_metadata",
+    "dropped_timeline_events",
+    "request_peak_bytes",
+    "hotspots",
+    "metric_overflows",
+    "unavailable_metrics",
+    "sampling"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "incomplete",
+        "truncated"
+      ]
+    },
+    "elapsed_wall_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Measured monotonic session elapsed nanoseconds, including fiber suspension."
+    },
+    "thread_cpu_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Measured thread CPU nanoseconds during the session, including other contexts in that thread."
+    },
+    "observed_boundary_peak_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Measured maximum absolute Zend request-heap snapshot at observed boundaries during this session. Not an exact session peak or session-owned memory."
+    },
+    "dropped_calls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unmatched_exits": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "clock_regressions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "memory_delta_bytes": {
+      "type": "integer",
+      "description": "Derived signed difference between request-heap stop and start snapshots, in bytes. Not allocation volume."
+    },
+    "functions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/metrics"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caller",
+          "callee",
+          "metrics"
+        ],
+        "properties": {
+          "caller": {
+            "type": "string"
+          },
+          "callee": {
+            "type": "string"
+          },
+          "metrics": {
+            "$ref": "#/$defs/metrics"
+          }
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "frame_id",
+          "parent_frame_id",
+          "symbol",
+          "start_ns",
+          "end_ns",
+          "completed",
+          "context_id",
+          "active_wall_ns",
+          "active_cpu_ns",
+          "suspended_wall_ns",
+          "outcome"
+        ],
+        "properties": {
+          "frame_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parent_frame_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "start_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "context_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_wall_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_cpu_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "suspended_wall_ns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outcome": {
+            "enum": [
+              "return",
+              "exception",
+              "incomplete"
+            ]
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metric_provenance": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Metric measurement/derivation, units, and attribution scope. Missing capabilities are declared explicitly; estimates are not substituted."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/metrics"
+      }
+    },
+    "timeline_enabled": {
+      "type": "boolean"
+    },
+    "termination_reason": {
+      "type": "string"
+    },
+    "runtime_metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "dropped_timeline_events": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Completed invocation records omitted after the timeline capacity was reached. Aggregate call graphs continue collecting independently."
+    },
+    "request_peak_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Measured Zend request-heap peak counter snapshot at report finalization, or null when unavailable. Scope is the current PHP peak window, which application memory_reset_peak_usage can reset. Not an exact session peak."
+    },
+    "hotspots": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Derived function ranking by exclusive wall time descending, then symbol ascending for ties. Metrics are copied function aggregates, not additional measurements.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "symbol",
+          "metrics"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "metrics": {
+            "$ref": "#/$defs/metrics"
+          }
+        }
+      }
+    },
+    "metric_overflows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Detected metric arithmetic range errors. If this counter itself saturates, metric_overflows is also listed as unavailable."
+    },
+    "unavailable_metrics": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "description": "Metric names with invalid/unavailable values. Names conservatively apply to every instance across functions, edges, operations, hotspots and timeline records. Corresponding provenance begins unavailable:. Capped numeric placeholders must not be treated as measurements."
+    },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "interval_ns",
+        "start_ns",
+        "end_ns",
+        "stack_depth_limit",
+        "status",
+        "termination_reason",
+        "final_counters_available",
+        "counter_overflow",
+        "timestamps_valid",
+        "counters_valid",
+        "counters",
+        "captured_samples",
+        "truncated_stacks",
+        "symbols",
+        "samples",
+        "frames",
+        "metric_provenance",
+        "final_counter_snapshot_ns",
+        "failure_reason"
+      ],
+      "properties": {
+        "mode": {
+          "const": "wall-safepoint"
+        },
+        "interval_ns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "start_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "end_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "stack_depth_limit": {
+          "const": 64
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "truncated"
+          ]
+        },
+        "termination_reason": {
+          "enum": [
+            "stopped",
+            "fork",
+            "clock_failure",
+            "thread_failure",
+            "capacity",
+            "unreported",
+            "callback_failure",
+            "counter_failure",
+            "identity_failure"
+          ]
+        },
+        "final_counters_available": {
+          "type": "boolean"
+        },
+        "counter_overflow": {
+          "type": "boolean"
+        },
+        "timestamps_valid": {
+          "type": "boolean"
+        },
+        "counters_valid": {
+          "type": "boolean"
+        },
+        "counters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "serviced_wakes",
+            "dropped_ticks",
+            "coalesced_wakes",
+            "dropped_samples",
+            "unserved_wakes",
+            "invalid_observations"
+          ],
+          "properties": {
+            "serviced_wakes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "dropped_ticks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "coalesced_wakes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "dropped_samples": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "unserved_wakes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "invalid_observations": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        },
+        "captured_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8192
+        },
+        "truncated_stacks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8192
+        },
+        "symbols": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "description": "Capture-order symbol IDs, independent of sorted functions; runtime bounds UTF-8 names to1024bytes."
+        },
+        "samples": {
+          "type": "array",
+          "maxItems": 8192,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "due_ns",
+              "first_wake_ns",
+              "last_wake_ns",
+              "service_ns",
+              "context_id",
+              "wake_count",
+              "dropped_ticks",
+              "first_frame",
+              "frame_count",
+              "depth_truncated",
+              "stack_truncated"
+            ],
+            "properties": {
+              "due_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "first_wake_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "last_wake_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "service_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "context_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "wake_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 18446744073709551615
+              },
+              "dropped_ticks": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "first_frame": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 524288
+              },
+              "frame_count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 64
+              },
+              "depth_truncated": {
+                "type": "boolean"
+              },
+              "stack_truncated": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "frames": {
+          "type": "array",
+          "maxItems": 524288,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8191
+          },
+          "description": "Flat symbol IDs. Each sample references frames[first_frame:first_frame+frame_count], leaf to root."
+        },
+        "metric_provenance": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "final_counter_snapshot_ns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "Actual monotonic time of the backend counter snapshot, distinct from graph stop, join and persistence. Null when not supplied."
+        },
+        "failure_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "stopped",
+            "fork",
+            "clock_failure",
+            "thread_failure",
+            "capacity",
+            "callback_failure",
+            "counter_failure",
+            "identity_failure"
+          ]
+        }
+      },
+      "description": "Opt-in wall-clock timer observations serviced at VM safepoints. One actual stack per batch; coalesced/lost wakes never imply extra stacks or CPU time. Its status is independent of instrumented graph status.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "counter_overflow": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "counters_valid": {
+                "const": false
+              },
+              "status": {
+                "const": "incomplete"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "timestamps_valid": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "incomplete"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "counters_valid": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "incomplete"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calls",
+        "inclusive_wall_ns",
+        "exclusive_wall_ns",
+        "inclusive_cpu_ns",
+        "exclusive_cpu_ns",
+        "memory_delta_bytes",
+        "exceptions"
+      ],
+      "properties": {
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inclusive_wall_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exclusive_wall_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inclusive_cpu_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exclusive_cpu_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "memory_delta_bytes": {
+          "type": "integer",
+          "description": "Derived sum of signed Zend request-heap differences across active frame segments, in bytes; not allocated bytes."
+        },
+        "exceptions": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

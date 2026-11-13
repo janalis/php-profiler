@@ -1,0 +1,44 @@
+{
+  "Darwin/arm64": {
+    "mago": {
+      "url": "https://github.com/carthage-software/mago/releases/download/1.28.0/mago-1.28.0-aarch64-apple-darwin.tar.gz",
+      "sha256": "39196cb1989f0aa58f89cb01abd4c49ec50909f84599a34cbe1438db4d4934ba"
+    },
+    "shellcheck": {
+      "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.aarch64.tar.gz",
+      "sha256": "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"
+    },
+    "actionlint": {
+      "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz",
+      "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"
+    }
+  },
+  "Darwin/x86_64": {
+    "mago": {
+      "url": "https://github.com/carthage-software/mago/releases/download/1.28.0/mago-1.28.0-x86_64-apple-darwin.tar.gz",
+      "sha256": "9df663556d827eef8317fcd0d136fce706c5e714bfdaf8aa50149c688dba8914"
+    },
+    "shellcheck": {
+      "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.x86_64.tar.gz",
+      "sha256": "c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51"
+    },
+    "actionlint": {
+      "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_amd64.tar.gz",
+      "sha256": "5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644"
+    }
+  },
+  "Linux/x86_64": {
+    "mago": {
+      "url": "https://github.com/carthage-software/mago/releases/download/1.28.0/mago-1.28.0-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "0fb349664a77d263f4c379be4f793fe484ce066ae8a90ee9cd3e5476e02ffe8f"
+    },
+    "shellcheck": {
+      "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz",
+      "sha256": "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"
+    },
+    "actionlint": {
+      "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+      "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+    }
+  }
+}

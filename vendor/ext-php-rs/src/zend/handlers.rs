@@ -1,0 +1,887 @@
+use std::{
+    ffi::CString, ffi::c_void, mem::MaybeUninit, os::raw::c_int, panic::AssertUnwindSafe,
+    panic::catch_unwind, ptr,
+};
+
+use crate::{
+    class::RegisteredClass,
+    error::php_error,
+    exception::PhpResult,
+    ffi::{
+        BP_VAR_IS, BP_VAR_R, ZEND_ACC_STATIC, ext_php_rs_executor_globals,
+        instanceof_function_slow, std_object_handlers, zend_class_entry, zend_hash_find,
+        zend_hash_str_find, zend_is_true, zend_object_handlers, zend_object_std_dtor,
+        zend_objects_clone_members, zend_property_info, zend_std_compare_objects,
+        zend_std_get_properties, zend_std_get_property_ptr_ptr, zend_std_has_property,
+        zend_std_read_property, zend_std_unset_property, zend_std_write_property, zend_throw_error,
+    },
+    flags::ErrorType,
+    flags::{PropertyFlags, ZvalTypeFlags},
+    internal::property::PropertyDescriptor,
+    types::{ZendClassObject, ZendHashTable, ZendObject, ZendStr, Zval},
+    zend::{ExecutorGlobals, catch_panic},
+};
+
+/// `ZEND_UNCOMPARABLE`, the `compare` handler's result for objects that cannot
+/// be ordered.
+const UNCOMPARABLE: c_int = 1;
+
+/// A set of functions associated with a PHP class.
+pub type ZendObjectHandlers = zend_object_handlers;
+
+impl ZendObjectHandlers {
+    /// Creates a new set of object handlers based on the standard object
+    /// handlers.
+    #[must_use]
+    pub fn new<T: RegisteredClass>() -> ZendObjectHandlers {
+        let mut this = MaybeUninit::uninit();
+
+        // SAFETY: `this` is allocated on the stack and is a valid memory location.
+        unsafe { Self::init::<T>(&raw mut *this.as_mut_ptr()) };
+
+        // SAFETY: We just initialized the handlers in the previous statement, therefore
+        // we are returning a valid object.
+        unsafe { this.assume_init() }
+    }
+
+    /// Initializes a given set of object handlers by copying the standard
+    /// object handlers into the memory location, as well as setting up the
+    /// `T` type destructor.
+    ///
+    /// # Parameters
+    ///
+    /// * `ptr` - Pointer to memory location to copy the standard handlers to.
+    ///
+    /// # Safety
+    ///
+    /// Caller must guarantee that the `ptr` given is a valid memory location.
+    ///
+    /// # Panics
+    ///
+    /// * If the offset of the `T` type is not a valid `i32` value.
+    #[cfg_attr(
+        not(php86),
+        expect(
+            clippy::expect_used,
+            reason = "the property offset is computed from a struct layout and fits in the engine's offset type"
+        )
+    )]
+    pub unsafe fn init<T: RegisteredClass>(ptr: *mut ZendObjectHandlers) {
+        unsafe { ptr::copy_nonoverlapping(&raw const std_object_handlers, ptr, 1) };
+        let offset = ZendClassObject::<T>::std_offset();
+        cfg_if::cfg_if! {
+            if #[cfg(php86)] {
+                unsafe { (*ptr).offset = offset };
+            } else {
+                unsafe { (*ptr).offset = offset.try_into().expect("Invalid offset") };
+            }
+        }
+        unsafe { (*ptr).free_obj = Some(Self::free_obj::<T>) };
+        unsafe { (*ptr).clone_obj = Some(Self::clone_obj::<T>) };
+        unsafe { (*ptr).read_property = Some(Self::read_property::<T>) };
+        unsafe { (*ptr).write_property = Some(Self::write_property::<T>) };
+        unsafe { (*ptr).get_properties = Some(Self::get_properties::<T>) };
+        unsafe { (*ptr).get_gc = Some(Self::get_gc) };
+        unsafe { (*ptr).has_property = Some(Self::has_property::<T>) };
+        unsafe { (*ptr).get_property_ptr_ptr = Some(Self::get_property_ptr_ptr::<T>) };
+        unsafe { (*ptr).unset_property = Some(Self::unset_property::<T>) };
+        unsafe { (*ptr).compare = Some(Self::compare::<T>) };
+    }
+
+    /// `zend_std_get_gc` routes objects with a custom `get_properties` through
+    /// that handler, and the collector calls it repeatedly while holding an
+    /// extra reference on the returned table (`GC_ADDREF(ht)` in
+    /// `gc_mark_grey`, restored in `gc_scan`). Merging Rust properties into a
+    /// table in that state trips `HT_ASSERT_RC1` and, once `gc_collect_white`
+    /// has dropped the children's counts, destroys zvals the collector still
+    /// walks. The last value produced by a Rust property getter is kept in the
+    /// property's declared slot, so the engine-owned storage covers it: this is
+    /// the standard-object branch of `zend_std_get_gc`.
+    ///
+    /// Not reported, as before this handler existed: zvals held inside the Rust
+    /// struct itself, and the initializer or proxy instance of a lazy object
+    /// (`zend_lazy_object_get_gc` is not exported). Cycles through those leak
+    /// instead of being collected.
+    unsafe extern "C" fn get_gc(
+        object: *mut ZendObject,
+        table: *mut *mut Zval,
+        n: *mut c_int,
+    ) -> *mut ZendHashTable {
+        let obj = unsafe { &mut *object };
+        if obj.properties.is_null() {
+            unsafe {
+                *table = obj.properties_table.as_mut_ptr();
+                *n = (*obj.ce).default_properties_count;
+            }
+            ptr::null_mut()
+        } else {
+            unsafe {
+                *table = ptr::null_mut();
+                *n = 0;
+            }
+            obj.properties
+        }
+    }
+
+    unsafe extern "C" fn free_obj<T: RegisteredClass>(object: *mut ZendObject) {
+        // Try to get the ZendClassObject. This may return None for:
+        // - PHP subclasses/mocks that didn't call the parent constructor
+        // - Objects where the Rust side was never initialized
+        if let Some(obj) = unsafe {
+            object
+                .as_mut()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj_mut(obj))
+        } {
+            // Manually drop the object as we don't want to free the underlying memory.
+            // A panic in the user's `Drop` must not escape this `extern "C"` frame, and
+            // no exception can be thrown here: this also runs from the collector and at
+            // shutdown. Report it as a warning and keep freeing the object.
+            let dropped = catch_unwind(AssertUnwindSafe(|| unsafe {
+                ptr::drop_in_place(&raw mut obj.obj);
+            }));
+            if let Err(payload) = dropped {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "non-string panic payload".to_owned());
+                php_error(
+                    &ErrorType::Warning,
+                    &format!("Rust panic in Drop for {}: {message}", T::CLASS_NAME),
+                );
+            }
+        }
+
+        // Always call the standard destructor to clean up the PHP object
+        unsafe { zend_object_std_dtor(object) };
+    }
+
+    unsafe extern "C" fn clone_obj<T: RegisteredClass>(object: *mut ZendObject) -> *mut ZendObject {
+        // PHP will call OBJ_RELEASE on the returned pointer if an exception
+        // is thrown, so we must NEVER return the original object. Always
+        // allocate a new (possibly uninitialized) object for error paths.
+        let cloned_val = catch_panic(|| {
+            Ok(unsafe {
+                object
+                    .as_ref()
+                    .and_then(|obj| ZendClassObject::<T>::from_zend_obj(obj))
+                    .and_then(|old| old.obj.as_ref())
+                    .and_then(RegisteredClass::clone_obj)
+            })
+        });
+
+        match cloned_val {
+            Ok(Some(val)) => {
+                let mut new = ZendClassObject::<T>::new(val);
+                unsafe { zend_objects_clone_members(&raw mut new.std, object) };
+                let raw = new.into_raw();
+                // SAFETY: `into_raw` yields a valid object the engine takes over.
+                unsafe { &raw mut (*raw).std }
+            }
+            Ok(None) => {
+                // Borrow the registered class name rather than owning a Rust
+                // message across Zend's potentially bailing-out error allocation.
+                // SAFETY: this handler runs only for registered T objects. The
+                // metadata's class entry and its NUL-terminated Zend name remain
+                // alive throughout the callback, including the error allocation.
+                let name = unsafe { (*T::get_metadata().ce().name).val.as_ptr() };
+                unsafe {
+                    zend_throw_error(
+                        ptr::null_mut(),
+                        c"Trying to clone an uncloneable object of class %s".as_ptr(),
+                        name,
+                    )
+                };
+                Self::released_placeholder::<T>()
+            }
+            Err(panic) => {
+                panic.throw();
+                Self::released_placeholder::<T>()
+            }
+        }
+    }
+
+    /// A fresh uninitialised object for the error paths of `clone_obj`: PHP calls
+    /// `OBJ_RELEASE` on whatever `clone_obj` returns once an exception is pending,
+    /// so the original must never be handed back. `free_obj` accepts the `None`
+    /// backing.
+    fn released_placeholder<T: RegisteredClass>() -> *mut ZendObject {
+        let empty = unsafe { ZendClassObject::<T>::new_uninit(None) };
+        let raw = empty.into_raw();
+        // SAFETY: `into_raw` yields a valid object the engine takes over.
+        unsafe { &raw mut (*raw).std }
+    }
+
+    #[allow(clippy::items_after_statements)]
+    unsafe extern "C" fn read_property<T: RegisteredClass>(
+        object: *mut ZendObject,
+        member: *mut ZendStr,
+        type_: c_int,
+        cache_slot: *mut *mut c_void,
+        rv: *mut Zval,
+    ) -> *mut Zval {
+        // If the object doesn't have a valid Rust backing (e.g., a mock or subclass
+        // that didn't call the parent constructor), fall back to standard PHP handling
+        let Some(obj) = (unsafe {
+            object
+                .as_mut()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj_mut(obj))
+        }) else {
+            let cache_slot = unsafe { std_cache_slot::<T>(member, cache_slot) };
+            return unsafe { zend_std_read_property(object, member, type_, cache_slot, rv) };
+        };
+
+        #[allow(clippy::inline_always)]
+        #[inline(always)]
+        unsafe fn internal<T: RegisteredClass>(
+            object: *mut ZendObject,
+            this: &T,
+            member: *mut ZendStr,
+            type_: c_int,
+            cache_slot: *mut *mut c_void,
+            rv: *mut Zval,
+        ) -> PhpResult<(*mut Zval, Option<Zval>)> {
+            let prop = unsafe { resolve_property::<T>(member, cache_slot)? };
+
+            // retval needs to be treated as initialized, so we set the type to null
+            let rv_mut = unsafe { rv.as_mut().ok_or("Invalid return zval given")? };
+            rv_mut.u1.type_info = ZvalTypeFlags::Null.bits();
+
+            Ok(match prop {
+                Some(prop_info) => {
+                    let object_ce = unsafe { (*object).ce };
+                    if !unsafe { check_property_access(prop_info.flags, object_ce) } {
+                        let is_private = prop_info.flags.contains(PropertyFlags::Private);
+                        let prop_name = unsafe {
+                            member
+                                .as_ref()
+                                .ok_or("Invalid property name pointer given")?
+                        };
+                        unsafe {
+                            throw_property_access_error(
+                                T::CLASS_NAME,
+                                prop_name.as_str()?,
+                                is_private,
+                            );
+                        }
+                        return Ok((rv, None));
+                    }
+                    let getter = prop_info
+                        .get
+                        .ok_or("No getter available for this property.")?;
+                    getter(this, rv_mut)?;
+                    if !matches!(u32::try_from(type_), Ok(BP_VAR_R | BP_VAR_IS)) {
+                        if !rv_mut.is_object() && !rv_mut.is_reference() {
+                            let class = unsafe { (*object).ce.as_ref() }
+                                .and_then(|ce| ce.name())
+                                .unwrap_or(T::CLASS_NAME);
+                            let name = unsafe { member.as_ref().ok_or("Invalid property name")? };
+                            php_error(
+                                &ErrorType::Notice,
+                                &format!(
+                                    "Indirect modification of overloaded property {class}::${} has no effect",
+                                    name.as_str()?
+                                ),
+                            );
+                        }
+                        return Ok((rv, None));
+                    }
+                    if !cache_slot.is_null() {
+                        return Ok((rv, None));
+                    }
+                    let info = unsafe {
+                        zend_hash_find(&raw const T::get_metadata().ce().properties_info, member)
+                    };
+                    match unsafe { declared_slot(object, info) } {
+                        Some(slot) => (slot, Some(unsafe { store_in_slot(slot, rv_mut) })),
+                        None => (rv, None),
+                    }
+                }
+                None => (
+                    unsafe { zend_std_read_property(object, member, type_, cache_slot, rv) },
+                    None,
+                ),
+            })
+        }
+
+        match catch_panic(|| unsafe {
+            internal::<T>(object, &**obj, member, type_, cache_slot, rv)
+        }) {
+            Ok((retval, released)) => {
+                drop(released);
+                retval
+            }
+            Err(e) => {
+                e.throw();
+                unsafe { (*rv).set_null() };
+                rv
+            }
+        }
+    }
+
+    #[allow(clippy::items_after_statements)]
+    unsafe extern "C" fn write_property<T: RegisteredClass>(
+        object: *mut ZendObject,
+        member: *mut ZendStr,
+        value: *mut Zval,
+        cache_slot: *mut *mut c_void,
+    ) -> *mut Zval {
+        // If the object doesn't have a valid Rust backing (e.g., a mock or subclass
+        // that didn't call the parent constructor), fall back to standard PHP handling
+        let Some(obj) = (unsafe {
+            object
+                .as_mut()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj_mut(obj))
+        }) else {
+            let cache_slot = unsafe { std_cache_slot::<T>(member, cache_slot) };
+            return unsafe { zend_std_write_property(object, member, value, cache_slot) };
+        };
+
+        #[allow(clippy::inline_always)]
+        #[inline(always)]
+        unsafe fn internal<T: RegisteredClass>(
+            object: *mut ZendObject,
+            obj: &mut ZendClassObject<T>,
+            member: *mut ZendStr,
+            value: *mut Zval,
+            cache_slot: *mut *mut c_void,
+        ) -> PhpResult<*mut Zval> {
+            let self_ = &mut *obj;
+            let prop = unsafe { resolve_property::<T>(member, cache_slot)? };
+            let value_mut = unsafe { value.as_mut().ok_or("Invalid return zval given")? };
+
+            Ok(match prop {
+                Some(prop_info) => {
+                    let object_ce = unsafe { (*object).ce };
+                    if !unsafe { check_property_access(prop_info.flags, object_ce) } {
+                        let is_private = prop_info.flags.contains(PropertyFlags::Private);
+                        let prop_name = unsafe {
+                            member
+                                .as_ref()
+                                .ok_or("Invalid property name pointer given")?
+                        };
+                        unsafe {
+                            throw_property_access_error(
+                                T::CLASS_NAME,
+                                prop_name.as_str()?,
+                                is_private,
+                            );
+                        }
+                        return Ok(value);
+                    }
+                    let setter = prop_info
+                        .set
+                        .ok_or("No setter available for this property.")?;
+                    setter(self_, value_mut)?;
+                    value
+                }
+                None => unsafe { zend_std_write_property(object, member, value, cache_slot) },
+            })
+        }
+
+        match catch_panic(|| unsafe { internal::<T>(object, obj, member, value, cache_slot) }) {
+            Ok(rv) => rv,
+            Err(e) => {
+                e.throw();
+                value
+            }
+        }
+    }
+
+    #[allow(clippy::items_after_statements)]
+    unsafe extern "C" fn get_properties<T: RegisteredClass>(
+        object: *mut ZendObject,
+    ) -> *mut ZendHashTable {
+        let props = unsafe { zend_std_get_properties(object) };
+        if props.is_null() {
+            return props;
+        }
+
+        // If the object doesn't have a valid Rust backing (e.g., a mock or subclass
+        // that didn't call the parent constructor), just return standard properties
+        let Some(obj) = (unsafe {
+            object
+                .as_ref()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj(obj))
+        }) else {
+            return props;
+        };
+
+        let mut released = Vec::new();
+        if let Err(e) = catch_panic(|| {
+            let _ = unsafe { refresh_slots::<T>(object, &**obj, &mut released) };
+            Ok(())
+        }) {
+            e.throw();
+        }
+        drop(released);
+
+        props
+    }
+
+    unsafe extern "C" fn get_property_ptr_ptr<T: RegisteredClass>(
+        object: *mut ZendObject,
+        member: *mut ZendStr,
+        type_: c_int,
+        cache_slot: *mut *mut c_void,
+    ) -> *mut Zval {
+        let backed = unsafe {
+            object
+                .as_ref()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj(obj))
+        }
+        .is_some();
+        if !backed {
+            let cache_slot = unsafe { std_cache_slot::<T>(member, cache_slot) };
+            return unsafe { zend_std_get_property_ptr_ptr(object, member, type_, cache_slot) };
+        }
+
+        match catch_panic(|| unsafe { resolve_property::<T>(member, cache_slot) }) {
+            Ok(Some(_)) => {
+                if !cache_slot.is_null() {
+                    unsafe { cache_slot.add(2).write(ptr::null_mut()) };
+                }
+                ptr::null_mut()
+            }
+            Ok(None) => unsafe { zend_std_get_property_ptr_ptr(object, member, type_, cache_slot) },
+            Err(e) => {
+                e.throw();
+                ptr::null_mut()
+            }
+        }
+    }
+
+    unsafe extern "C" fn unset_property<T: RegisteredClass>(
+        object: *mut ZendObject,
+        member: *mut ZendStr,
+        cache_slot: *mut *mut c_void,
+    ) {
+        let backed = unsafe {
+            object
+                .as_ref()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj(obj))
+        }
+        .is_some();
+        if !backed {
+            let cache_slot = unsafe { std_cache_slot::<T>(member, cache_slot) };
+            return unsafe { zend_std_unset_property(object, member, cache_slot) };
+        }
+
+        let refused = catch_panic(|| {
+            let Some(prop) = (unsafe { resolve_property::<T>(member, cache_slot)? }) else {
+                return Ok(false);
+            };
+            let name = unsafe { member.as_ref().ok_or("Invalid property name")? }.as_str()?;
+            if unsafe { check_property_access(prop.flags, (*object).ce) } {
+                unsafe { throw_unset_error(T::CLASS_NAME, name) };
+            } else {
+                let is_private = prop.flags.contains(PropertyFlags::Private);
+                unsafe { throw_property_access_error(T::CLASS_NAME, name, is_private) };
+            }
+            Ok(true)
+        });
+
+        match refused {
+            Ok(true) => {}
+            Ok(false) => unsafe { zend_std_unset_property(object, member, cache_slot) },
+            Err(e) => e.throw(),
+        }
+    }
+
+    unsafe extern "C" fn compare<T: RegisteredClass>(o1: *mut Zval, o2: *mut Zval) -> c_int {
+        let objects = unsafe { o1.as_ref().zip(o2.as_ref()) }
+            .filter(|(a, b)| a.is_object() && b.is_object())
+            .map(|(a, b)| unsafe { (a.value.obj, b.value.obj) })
+            .filter(|&(a, b)| a != b && unsafe { (*a).ce == (*b).ce });
+        let Some((a, b)) = objects else {
+            return unsafe { zend_std_compare_objects(o1, o2) };
+        };
+
+        let mut released = Vec::new();
+        let refreshed = catch_panic(|| {
+            for object in [a, b] {
+                let Some(obj) = (unsafe {
+                    object
+                        .as_ref()
+                        .and_then(|obj| ZendClassObject::<T>::from_zend_obj(obj))
+                }) else {
+                    continue;
+                };
+                unsafe { refresh_slots::<T>(object, &**obj, &mut released) }?;
+            }
+            Ok(())
+        });
+        drop(released);
+
+        match refreshed {
+            Ok(()) if !ExecutorGlobals::has_exception() => unsafe {
+                zend_std_compare_objects(o1, o2)
+            },
+            Ok(()) => UNCOMPARABLE,
+            Err(e) => {
+                e.throw();
+                UNCOMPARABLE
+            }
+        }
+    }
+
+    #[allow(clippy::items_after_statements)]
+    unsafe extern "C" fn has_property<T: RegisteredClass>(
+        object: *mut ZendObject,
+        member: *mut ZendStr,
+        has_set_exists: c_int,
+        cache_slot: *mut *mut c_void,
+    ) -> c_int {
+        // If the object doesn't have a valid Rust backing (e.g., a mock or subclass
+        // that didn't call the parent constructor), fall back to standard PHP handling
+        let Some(obj) = (unsafe {
+            object
+                .as_mut()
+                .and_then(|obj| ZendClassObject::<T>::from_zend_obj_mut(obj))
+        }) else {
+            let cache_slot = unsafe { std_cache_slot::<T>(member, cache_slot) };
+            return unsafe { zend_std_has_property(object, member, has_set_exists, cache_slot) };
+        };
+
+        #[allow(clippy::inline_always)]
+        #[inline(always)]
+        unsafe fn internal<T: RegisteredClass>(
+            object: *mut ZendObject,
+            obj: &mut ZendClassObject<T>,
+            member: *mut ZendStr,
+            has_set_exists: c_int,
+            cache_slot: *mut *mut c_void,
+        ) -> PhpResult<c_int> {
+            let prop = unsafe { resolve_property::<T>(member, cache_slot)? };
+            let self_ = &*obj;
+
+            match has_set_exists {
+                //
+                // * 0 (has) whether property exists and is not NULL
+                0 => {
+                    if let Some(val) = prop {
+                        let getter = val.get.ok_or("No getter available for this property.")?;
+                        let mut zv = Zval::new();
+                        getter(self_, &mut zv)?;
+                        return Ok(c_int::from(!zv.is_null()));
+                    }
+                }
+                //
+                // * 1 (set) whether property exists and is true
+                1 => {
+                    if let Some(val) = prop {
+                        let getter = val.get.ok_or("No getter available for this property.")?;
+                        let mut zv = Zval::new();
+                        getter(self_, &mut zv)?;
+
+                        cfg_if::cfg_if! {
+                            if #[cfg(php84)] {
+                                #[allow(clippy::unnecessary_mut_passed)]
+                                let truthy = unsafe { zend_is_true(&raw mut zv) };
+                            } else {
+                                #[allow(clippy::unnecessary_mut_passed)]
+                                let truthy = unsafe { zend_is_true(&raw mut zv) } == 1;
+                            }
+                        }
+                        return Ok(c_int::from(truthy));
+                    }
+                }
+                //
+                // * 2 (exists) whether property exists
+                2 => {
+                    if prop.is_some() {
+                        return Ok(1);
+                    }
+                }
+                _ => return Err(
+                    "Invalid value given for `has_set_exists` in struct `has_property` function."
+                        .into(),
+                ),
+            }
+
+            Ok(unsafe { zend_std_has_property(object, member, has_set_exists, cache_slot) })
+        }
+
+        match catch_panic(|| unsafe {
+            internal::<T>(object, obj, member, has_set_exists, cache_slot)
+        }) {
+            Ok(rv) => rv,
+            Err(e) => {
+                e.throw();
+                0
+            }
+        }
+    }
+}
+
+/// Resolves a property descriptor via `cache_slot` or linear scan fallback.
+///
+/// On cache hit (`cache_slot[1]` matches this class's metadata pointer), returns
+/// the cached `&PropertyDescriptor<T>` directly, skipping string conversion and
+/// `find_property`. On miss, performs the full lookup and populates the cache for
+/// subsequent calls.
+///
+/// # Safety
+///
+/// - `member` must be a valid `ZendStr` pointer.
+/// - `cache_slot` must be null or point to at least 2 writable `*mut c_void` slots
+///   (guaranteed by PHP's opcode compiler for all property access opcodes).
+#[allow(clippy::inline_always)]
+#[inline(always)]
+unsafe fn resolve_property<T: RegisteredClass>(
+    member: *mut ZendStr,
+    cache_slot: *mut *mut c_void,
+) -> PhpResult<Option<&'static PropertyDescriptor<T>>> {
+    let meta = T::get_metadata();
+    let meta_ptr = ptr::from_ref(meta).cast::<c_void>().cast_mut();
+
+    if !cache_slot.is_null() {
+        let guard = unsafe { *cache_slot.add(1) };
+        if guard == meta_ptr {
+            let desc = unsafe { &*(*cache_slot).cast::<PropertyDescriptor<T>>() };
+            return Ok(Some(desc));
+        }
+    }
+
+    let prop_name = unsafe {
+        member
+            .as_ref()
+            .ok_or("Invalid property name pointer given")?
+    };
+    let Some(descriptor) = meta.find_property(prop_name.as_str()?) else {
+        return Ok(None);
+    };
+
+    if !cache_slot.is_null() {
+        unsafe {
+            *cache_slot = ptr::from_ref(descriptor).cast::<c_void>().cast_mut();
+            *cache_slot.add(1) = meta_ptr;
+        }
+    }
+
+    Ok(Some(descriptor))
+}
+
+/// Returns the declared slot (`OBJ_PROP`) of `object` described by `info`, the
+/// `properties_info` entry of the class that declares the property.
+///
+/// # Safety
+///
+/// `object` must be a live object of that class or a subclass, and `info` null
+/// or an entry of that class's `properties_info`.
+unsafe fn declared_slot(object: *mut ZendObject, info: *const Zval) -> Option<*mut Zval> {
+    let info = unsafe {
+        info.as_ref()?
+            .value
+            .ptr
+            .cast::<zend_property_info>()
+            .as_ref()?
+    };
+    if info.flags & ZEND_ACC_STATIC != 0 {
+        return None;
+    }
+    let offset = usize::try_from(info.offset).ok()?;
+    Some(unsafe { object.byte_add(offset).cast::<Zval>() })
+}
+
+/// Moves `value` into `slot`, leaving `value` null, and returns the previous
+/// slot value. The property flags in `u2` are kept. The object owns the result,
+/// so a caller that never releases its `rv` (`Exception::getMessage`) cannot
+/// leak it.
+///
+/// # Safety
+///
+/// `slot` must come from [`declared_slot`]. Dropping the returned value can run
+/// a destructor that reaches the same object, so the caller drops it only once
+/// no `&T` into that object is alive. A C caller iterating the slot must not run
+/// user code that reads the same property with a null cache slot, as that store
+/// frees the value it iterates.
+#[must_use]
+unsafe fn store_in_slot(slot: *mut Zval, value: &mut Zval) -> Zval {
+    let slot = unsafe { &mut *slot };
+    let mut previous = Zval::new();
+    previous.value = slot.value;
+    previous.u1 = slot.u1;
+    slot.value = value.value;
+    slot.u1 = value.u1;
+    value.u1.type_info = ZvalTypeFlags::Null.bits();
+    previous
+}
+
+/// Stores every Rust property's current value in its declared slot. Released
+/// values that can run user code on release go to `released`, for the caller
+/// to drop once `this` is no longer borrowed. Keeps going after a getter error
+/// and returns the first one.
+///
+/// # Safety
+///
+/// `object` must be the live object that `this` belongs to.
+unsafe fn refresh_slots<T: RegisteredClass>(
+    object: *mut ZendObject,
+    this: &T,
+    released: &mut Vec<Zval>,
+) -> PhpResult {
+    let metadata = T::get_metadata();
+    let properties_info = &raw const metadata.ce().properties_info;
+    let mut result = Ok(());
+
+    for desc in metadata.all_properties() {
+        let Some(getter) = desc.get else { continue };
+        let info = unsafe {
+            zend_hash_str_find(properties_info, desc.name.as_ptr().cast(), desc.name.len())
+        };
+        let Some(slot) = (unsafe { declared_slot(object, info) }) else {
+            continue;
+        };
+        let mut zv = Zval::new();
+        if let Err(e) = getter(this, &mut zv) {
+            if result.is_ok() {
+                result = Err(e);
+            }
+            continue;
+        }
+        let previous = unsafe { store_in_slot(slot, &mut zv) };
+        if ZvalTypeFlags::from_bits_truncate(unsafe { previous.u1.type_info })
+            .contains(ZvalTypeFlags::RefCounted)
+        {
+            released.push(previous);
+        }
+    }
+
+    result
+}
+
+/// The cache slot to hand to a `zend_std_*` handler for an object without Rust
+/// backing. For a Rust property name the engine must never cache `(ce, offset)`,
+/// or later objects of the class with a backing would read and write the slot
+/// directly. The slot is cleared (it can be the VM's stack copy on 8.4+), as the
+/// VM reads `cache_slot[2]` as property info after a non-null
+/// `get_property_ptr_ptr` (php-src GH-17736), and NULL is returned.
+///
+/// # Safety
+///
+/// `member` must be a valid `ZendStr` and `cache_slot` null or 3 writable slots.
+unsafe fn std_cache_slot<T: RegisteredClass>(
+    member: *mut ZendStr,
+    cache_slot: *mut *mut c_void,
+) -> *mut *mut c_void {
+    let is_rust_prop = unsafe { member.as_ref() }
+        .and_then(|name| name.as_str().ok())
+        .is_some_and(|name| T::get_metadata().find_property(name).is_some());
+    if !is_rust_prop {
+        return cache_slot;
+    }
+    if !cache_slot.is_null() {
+        for i in 0..3 {
+            unsafe { cache_slot.add(i).write(ptr::null_mut()) };
+        }
+    }
+    ptr::null_mut()
+}
+
+/// Gets the current calling scope from the executor globals.
+///
+/// # Safety
+///
+/// Must only be called during PHP execution when executor globals are valid.
+#[inline]
+unsafe fn get_calling_scope() -> *const zend_class_entry {
+    let eg = unsafe { ext_php_rs_executor_globals().as_ref() };
+    let Some(eg) = eg else {
+        return ptr::null();
+    };
+    let execute_data = eg.current_execute_data;
+
+    if execute_data.is_null() {
+        return ptr::null();
+    }
+
+    let func = unsafe { (*execute_data).func };
+    if func.is_null() {
+        return ptr::null();
+    }
+
+    // Access the common.scope field through the union
+    unsafe { (*func).common.scope }
+}
+
+/// Checks if the calling scope has access to a property with the given flags.
+///
+/// Returns `true` if access is allowed, `false` otherwise.
+///
+/// # Safety
+///
+/// Must only be called during PHP execution when executor globals are valid.
+/// The `object_ce` pointer must be valid.
+#[inline]
+unsafe fn check_property_access(flags: PropertyFlags, object_ce: *const zend_class_entry) -> bool {
+    // Public properties are always accessible
+    if !flags.contains(PropertyFlags::Private) && !flags.contains(PropertyFlags::Protected) {
+        return true;
+    }
+
+    let calling_scope = unsafe { get_calling_scope() };
+
+    if flags.contains(PropertyFlags::Private) {
+        // Private: must be called from the exact same class
+        return calling_scope == object_ce;
+    }
+
+    if flags.contains(PropertyFlags::Protected) {
+        // Protected: must be called from same class or a subclass
+        if calling_scope.is_null() {
+            return false;
+        }
+
+        // Same class check
+        if calling_scope == object_ce {
+            return true;
+        }
+
+        // Check if calling_scope is a subclass of object_ce
+        // or if object_ce is a subclass of calling_scope (for parent access)
+        unsafe {
+            instanceof_function_slow(calling_scope, object_ce)
+                || instanceof_function_slow(object_ce, calling_scope)
+        }
+    } else {
+        true
+    }
+}
+
+/// Throws an error for invalid property access.
+///
+/// A property name may legally contain NUL bytes, since `zend_string` is length
+/// prefixed. Such a name cannot be interpolated into a C string, so the message
+/// falls back to a generic one rather than panicking inside the `extern "C"` frame
+/// this runs in.
+///
+/// # Safety
+///
+/// Must only be called during PHP execution.
+unsafe fn throw_property_access_error(class_name: &str, prop_name: &str, is_private: bool) {
+    let visibility = if is_private { "private" } else { "protected" };
+    let message = CString::new(format!(
+        "Cannot access {visibility} property {class_name}::${prop_name}"
+    ))
+    .unwrap_or_else(|_| c"Cannot access property".to_owned());
+
+    unsafe {
+        zend_throw_error(ptr::null_mut(), message.as_ptr());
+    }
+}
+
+/// Throws the error for `unset()` on a Rust property, whose value lives in
+/// Rust and cannot be removed.
+///
+/// # Safety
+///
+/// Must only be called during PHP execution.
+unsafe fn throw_unset_error(class_name: &str, prop_name: &str) {
+    let message = CString::new(format!("Cannot unset property {class_name}::${prop_name}"))
+        .unwrap_or_else(|_| c"Cannot unset property".to_owned());
+
+    unsafe {
+        zend_throw_error(ptr::null_mut(), message.as_ptr());
+    }
+}

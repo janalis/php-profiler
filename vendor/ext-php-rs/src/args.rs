@@ -1,0 +1,616 @@
+//! Builder and objects relating to function and method arguments.
+
+use std::{ffi::CString, ptr};
+
+use crate::{
+    convert::{FromZvalMut, IntoZvalDyn},
+    describe::{Parameter, abi},
+    error::{Error, Result},
+    ffi::{zend_internal_arg_info, zend_wrong_parameters_count_error},
+    flags::DataType,
+    types::Zval,
+    zend::ZendType,
+};
+
+/// Argument info tables of a class's or enum's methods, one per method.
+///
+/// The Zend engine borrows these for the life of the process, so they must be
+/// parked in something that lives that long.
+pub type ArgInfoTables = Box<[Box<[ArgInfo]>]>;
+
+/// Represents an argument to a function.
+#[must_use]
+#[derive(Debug)]
+pub struct Arg<'a> {
+    name: String,
+    r#type: DataType,
+    as_ref: bool,
+    allow_null: bool,
+    pub(crate) variadic: bool,
+    default_value: Option<String>,
+    zval: Option<&'a mut Zval>,
+    variadic_zvals: Vec<Option<&'a mut Zval>>,
+}
+
+impl<'a> Arg<'a> {
+    /// Creates a new argument.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - The name of the parameter.
+    /// * `_type` - The type of the parameter.
+    pub fn new<T: Into<String>>(name: T, r#type: DataType) -> Self {
+        Arg {
+            name: name.into(),
+            r#type,
+            as_ref: false,
+            allow_null: false,
+            variadic: false,
+            default_value: None,
+            zval: None,
+            variadic_zvals: vec![],
+        }
+    }
+
+    /// Creates an argument whose type, nullability and pass-by-reference
+    /// flag come from the Rust type it is extracted into.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - The name of the parameter.
+    pub fn of<T: FromZvalMut<'a>>(name: impl Into<String>) -> Self {
+        Arg {
+            name: name.into(),
+            r#type: T::TYPE,
+            as_ref: T::BY_REF,
+            allow_null: T::NULLABLE,
+            variadic: false,
+            default_value: None,
+            zval: None,
+            variadic_zvals: vec![],
+        }
+    }
+
+    /// Sets the argument as a reference.
+    #[allow(clippy::wrong_self_convention)]
+    pub fn as_ref(mut self) -> Self {
+        self.as_ref = true;
+        self
+    }
+
+    /// Sets the argument as variadic.
+    pub fn is_variadic(mut self) -> Self {
+        self.variadic = true;
+        self
+    }
+
+    /// Sets the argument as nullable.
+    pub fn allow_null(mut self) -> Self {
+        self.allow_null = true;
+        self
+    }
+
+    /// Sets the default value for the argument.
+    pub fn default<T: Into<String>>(mut self, default: T) -> Self {
+        self.default_value = Some(default.into());
+        self
+    }
+
+    /// Attempts to consume the argument, converting the inner type into `T`.
+    /// Upon success, the result is returned in a [`Result`].
+    ///
+    /// As this function consumes, it cannot return a reference to the
+    /// underlying zval.
+    ///
+    /// # Errors
+    ///
+    /// If the conversion fails (or the argument contains no value), the
+    /// argument is returned in an [`Err`] variant.
+    pub fn consume<T>(mut self) -> Result<T, Self>
+    where
+        for<'b> T: FromZvalMut<'b>,
+    {
+        self.zval
+            .as_mut()
+            .and_then(|zv| T::from_zval_mut(zv.dereference_mut()))
+            .ok_or(self)
+    }
+
+    /// Attempts to retrieve the value of the argument.
+    /// This will be None until the [`ArgParser`] is used to parse
+    /// the arguments.
+    pub fn val<T>(&'a mut self) -> Option<T>
+    where
+        T: FromZvalMut<'a>,
+    {
+        self.zval
+            .as_mut()
+            .and_then(|zv| T::from_zval_mut(zv.dereference_mut()))
+    }
+
+    /// Gets all the variadic values for this Rust argument. The result does not
+    /// contain a value that cannot be converted into `T`.
+    /// [`try_variadic_vals`](Self::try_variadic_vals) rejects it.
+    pub fn variadic_vals<T>(&'a mut self) -> Vec<T>
+    where
+        T: FromZvalMut<'a>,
+    {
+        self.variadic_zvals
+            .iter_mut()
+            .filter_map(|zv| zv.as_mut())
+            .filter_map(|zv| T::from_zval_mut(zv.dereference_mut()))
+            .collect()
+    }
+
+    /// Gets all the variadic values for this Rust argument. Returns `None` if
+    /// one of the values cannot be converted into `T`.
+    pub fn try_variadic_vals<T>(&'a mut self) -> Option<Vec<T>>
+    where
+        T: FromZvalMut<'a>,
+    {
+        self.variadic_zvals
+            .iter_mut()
+            .filter_map(|zv| zv.as_mut())
+            .map(|zv| T::from_zval_mut(zv.dereference_mut()))
+            .collect()
+    }
+
+    /// Attempts to return a reference to the arguments internal Zval.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&Zval)` - The internal zval.
+    /// * `None` - The argument was empty.
+    // TODO: Figure out if we can change this
+    #[allow(clippy::mut_mut)]
+    pub fn zval(&mut self) -> Option<&mut &'a mut Zval> {
+        self.zval.as_mut()
+    }
+
+    /// Attempts to call the argument as a callable with a list of arguments to
+    /// pass to the function. Note that a thrown exception inside the
+    /// callable is not detectable, therefore you should check if the return
+    /// value is valid rather than unwrapping. Returns a result containing the
+    /// return value of the function, or an error.
+    ///
+    /// You should not call this function directly, rather through the
+    /// [`call_user_func`](crate::call_user_func) macro.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A list of parameters to call the function with.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::Callable` - The argument is not callable.
+    // TODO: Measure this
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    pub fn try_call(&self, params: Vec<&dyn IntoZvalDyn>) -> Result<Zval> {
+        self.zval.as_ref().ok_or(Error::Callable)?.try_call(params)
+    }
+
+    /// Returns the internal PHP argument info.
+    ///
+    /// An optional nullable argument without an explicit default reports
+    /// `null` as its default, the same way PHP declares `?T $x = null`.
+    pub(crate) fn as_arg_info(&self, optional: bool) -> Result<ArgInfo> {
+        let default_value = match &self.default_value {
+            Some(val) => Some(val.as_str()),
+            None if optional && self.allow_null && !self.variadic => Some("null"),
+            None => None,
+        };
+        Ok(ArgInfo {
+            name: CString::new(self.name.as_str())?.into_raw(),
+            type_: ZendType::empty_from_type(
+                self.r#type,
+                self.as_ref,
+                self.variadic,
+                self.allow_null,
+            )
+            .ok_or(Error::ZvalConversion(self.r#type))?,
+            default_value: match default_value {
+                Some(val) => CString::new(val)?.into_raw(),
+                None => ptr::null(),
+            },
+        })
+    }
+}
+
+impl From<Arg<'_>> for Parameter {
+    fn from(val: Arg<'_>) -> Self {
+        Parameter {
+            name: val.name.into(),
+            ty: Some(val.r#type).into(),
+            nullable: val.allow_null,
+            variadic: val.variadic,
+            default: val.default_value.map(abi::RString::from).into(),
+        }
+    }
+}
+
+/// Internal argument information used by Zend.
+pub type ArgInfo = zend_internal_arg_info;
+
+/// Number of required parameters for a signature, given for every parameter
+/// whether it may be omitted (nullable or defaulted).
+///
+/// Follows the PHP rule: only the trailing run of omittable parameters is
+/// optional, an omittable parameter followed by a required one stays required.
+#[must_use]
+pub const fn required_count(omittable: &[bool]) -> usize {
+    let mut required = omittable.len();
+    while required > 0 && omittable[required - 1] {
+        required -= 1;
+    }
+    required
+}
+
+/// Parses the arguments of a function.
+#[must_use]
+pub struct ArgParser<'a, 'b> {
+    args: Vec<&'b mut Arg<'a>>,
+    min_num_args: Option<usize>,
+    arg_zvals: Vec<Option<&'a mut Zval>>,
+}
+
+impl<'a, 'b> ArgParser<'a, 'b> {
+    /// Builds a new function argument parser.
+    pub fn new(arg_zvals: Vec<Option<&'a mut Zval>>) -> Self {
+        ArgParser {
+            args: vec![],
+            min_num_args: None,
+            arg_zvals,
+        }
+    }
+
+    /// Adds a new argument to the parser.
+    ///
+    /// # Parameters
+    ///
+    /// * `arg` - The argument to add to the parser.
+    pub fn arg(mut self, arg: &'b mut Arg<'a>) -> Self {
+        self.args.push(arg);
+        self
+    }
+
+    /// Sets the next arguments to be added as not required.
+    pub fn not_required(mut self) -> Self {
+        self.min_num_args = Some(self.args.len());
+        self
+    }
+
+    /// Sets how many leading arguments are required, see [`required_count`].
+    pub fn required_args(mut self, count: usize) -> Self {
+        self.min_num_args = Some(count);
+        self
+    }
+
+    /// Uses the argument parser to parse the arguments contained in the given
+    /// `ExecuteData` object. Returns successfully if the arguments were
+    /// parsed.
+    ///
+    /// This function can only be safely called from within an exported PHP
+    /// function.
+    ///
+    /// # Parameters
+    ///
+    /// * `execute_data` - The execution data from the function.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] type if there were too many or too little arguments
+    /// passed to the function. The user has already been notified so you
+    /// should break execution after seeing an error type.
+    ///
+    /// Also returns an error if the number of min/max arguments exceeds
+    /// `u32::MAX`
+    pub fn parse(mut self) -> Result<()> {
+        let max_num_args = self.args.len();
+        let mut min_num_args = self.min_num_args.unwrap_or(max_num_args);
+        let num_args = self.arg_zvals.len();
+        let has_variadic = self.args.last().is_some_and(|arg| arg.variadic);
+        if has_variadic {
+            min_num_args = min_num_args.saturating_sub(1);
+        }
+
+        if num_args < min_num_args || (!has_variadic && num_args > max_num_args) {
+            // SAFETY: Exported C function is safe, return value is unused and parameters
+            // are copied.
+            unsafe {
+                zend_wrong_parameters_count_error(
+                    min_num_args.try_into()?,
+                    max_num_args.try_into()?,
+                );
+            };
+            return Err(Error::IncorrectArguments(num_args, min_num_args));
+        }
+
+        for (i, arg_zval) in self.arg_zvals.into_iter().enumerate() {
+            let arg = match self.args.get_mut(i) {
+                Some(arg) => Some(arg),
+                // Only select the last item if it's variadic
+                None => self.args.last_mut().filter(|arg| arg.variadic),
+            };
+            if let Some(arg) = arg {
+                if arg.variadic {
+                    arg.variadic_zvals.push(arg_zval);
+                } else {
+                    arg.zval = arg_zval;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    #[cfg(feature = "embed")]
+    use crate::embed::Embed;
+
+    use super::*;
+
+    #[test]
+    fn required_count_keeps_omittable_args_before_a_required_one() {
+        assert_eq!(required_count(&[]), 0);
+        assert_eq!(required_count(&[false, false]), 2);
+        assert_eq!(required_count(&[false, true]), 1);
+        assert_eq!(required_count(&[true, false, true, true]), 2);
+        assert_eq!(required_count(&[true, true]), 0);
+    }
+
+    #[test]
+    fn of_reads_metadata_from_the_type() {
+        let arg = Arg::of::<Option<i64>>("maybe");
+        assert_eq!(arg.r#type, DataType::Long);
+        assert!(arg.allow_null);
+        assert!(!arg.as_ref);
+        let arg = Arg::of::<&mut Zval>("target");
+        assert_eq!(arg.r#type, DataType::Mixed);
+        assert!(!arg.allow_null);
+        assert!(arg.as_ref);
+    }
+
+    fn default_of(arg: &Arg<'_>, optional: bool) -> Option<String> {
+        let info = arg.as_arg_info(optional).unwrap();
+        unsafe { drop(CString::from_raw(info.name.cast_mut())) };
+        if info.default_value.is_null() {
+            return None;
+        }
+        let default = unsafe { CString::from_raw(info.default_value.cast_mut()) };
+        Some(default.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn optional_nullable_arg_reports_a_null_default() {
+        assert_eq!(
+            default_of(&Arg::of::<Option<i64>>("a"), true).as_deref(),
+            Some("null")
+        );
+        assert_eq!(default_of(&Arg::of::<Option<i64>>("a"), false), None);
+        assert_eq!(default_of(&Arg::of::<i64>("a"), true), None);
+        assert_eq!(
+            default_of(&Arg::of::<Option<i64>>("a").is_variadic(), true),
+            None
+        );
+        assert_eq!(
+            default_of(&Arg::of::<Option<i64>>("a").default("5"), true).as_deref(),
+            Some("5")
+        );
+    }
+
+    #[test]
+    fn test_new() {
+        let arg = Arg::new("test", DataType::Long);
+        assert_eq!(arg.name, "test");
+        assert_eq!(arg.r#type, DataType::Long);
+        assert!(!arg.as_ref);
+        assert!(!arg.allow_null);
+        assert!(!arg.variadic);
+        assert!(arg.default_value.is_none());
+        assert!(arg.zval.is_none());
+        assert!(arg.variadic_zvals.is_empty());
+    }
+
+    #[test]
+    fn test_as_ref() {
+        let arg = Arg::new("test", DataType::Long).as_ref();
+        assert!(arg.as_ref);
+    }
+
+    #[test]
+    fn test_is_variadic() {
+        let arg = Arg::new("test", DataType::Long).is_variadic();
+        assert!(arg.variadic);
+    }
+
+    #[test]
+    fn test_allow_null() {
+        let arg = Arg::new("test", DataType::Long).allow_null();
+        assert!(arg.allow_null);
+    }
+
+    #[test]
+    fn test_default() {
+        let arg = Arg::new("test", DataType::Long).default("default");
+        assert_eq!(arg.default_value, Some("default".to_string()));
+
+        // TODO: Validate type
+    }
+
+    #[test]
+    fn test_consume_no_value() {
+        let arg = Arg::new("test", DataType::Long);
+        let result: Result<i32, _> = arg.consume();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().name, "test");
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_consume() {
+        let mut arg = Arg::new("test", DataType::Long);
+        let mut zval = Zval::from(42);
+        arg.zval = Some(&mut zval);
+
+        let result: Result<i32, _> = arg.consume();
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_val_no_value() {
+        let mut arg = Arg::new("test", DataType::Long);
+        let result: Option<i32> = arg.val();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_val() {
+        let mut arg = Arg::new("test", DataType::Long);
+        let mut zval = Zval::from(42);
+        arg.zval = Some(&mut zval);
+
+        let result: Option<i32> = arg.val();
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_variadic_vals() {
+        let mut arg = Arg::new("test", DataType::Long).is_variadic();
+        let mut zval1 = Zval::from(42);
+        let mut zval2 = Zval::from(43);
+        arg.variadic_zvals.push(Some(&mut zval1));
+        arg.variadic_zvals.push(Some(&mut zval2));
+
+        let result: Vec<i32> = arg.variadic_vals();
+        assert_eq!(result, vec![42, 43]);
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn try_variadic_vals_fails_when_a_value_does_not_convert() {
+        let mut arg = Arg::new("test", DataType::Long).is_variadic();
+        let mut long = Zval::from(42);
+        let mut double = Zval::from(1.5);
+        arg.variadic_zvals.push(Some(&mut long));
+        arg.variadic_zvals.push(Some(&mut double));
+
+        assert_eq!(arg.try_variadic_vals::<i64>(), None);
+    }
+
+    #[test]
+    fn test_zval_no_value() {
+        let mut arg = Arg::new("test", DataType::Long);
+        let result = arg.zval();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_zval() {
+        let mut arg = Arg::new("test", DataType::Long);
+        let mut zval = Zval::from(42);
+        arg.zval = Some(&mut zval);
+
+        let result = arg.zval();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().dereference_mut().long(), Some(42));
+    }
+
+    #[cfg(feature = "embed")]
+    #[test]
+    fn test_try_call_no_value() {
+        let arg = Arg::new("test", DataType::Long);
+        let result = arg.try_call(vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_try_call_not_callable() {
+        Embed::run(|| {
+            let mut arg = Arg::new("test", DataType::Long);
+            let mut zval = Zval::from(42);
+            arg.zval = Some(&mut zval);
+
+            let result = arg.try_call(vec![]);
+            assert!(result.is_err());
+        });
+    }
+
+    // TODO: Test the callable case
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_as_arg_info() {
+        let arg = Arg::new("test", DataType::Long);
+        let arg_info = arg.as_arg_info(false);
+        assert!(arg_info.is_ok());
+
+        let arg_info = arg_info.unwrap();
+        assert!(arg_info.default_value.is_null());
+
+        let r#type = arg_info.type_;
+        assert_eq!(r#type.type_mask, 16);
+
+        unsafe { drop(CString::from_raw(arg_info.name.cast_mut())) };
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn test_as_arg_info_with_default() {
+        let arg = Arg::new("test", DataType::Long).default("default");
+        let arg_info = arg.as_arg_info(false);
+        assert!(arg_info.is_ok());
+
+        let arg_info = arg_info.unwrap();
+        assert!(!arg_info.default_value.is_null());
+
+        let r#type = arg_info.type_;
+        assert_eq!(r#type.type_mask, 16);
+
+        unsafe {
+            drop(CString::from_raw(arg_info.name.cast_mut()));
+            drop(CString::from_raw(arg_info.default_value.cast_mut()));
+        }
+    }
+
+    #[test]
+    fn test_param_from_arg() {
+        let arg = Arg::new("test", DataType::Long)
+            .default("default")
+            .allow_null();
+        let param: Parameter = arg.into();
+        assert_eq!(param.name, "test".into());
+        assert_eq!(param.ty, abi::Option::Some(DataType::Long));
+        assert!(param.nullable);
+        assert_eq!(param.default, abi::Option::Some("default".into()));
+    }
+
+    #[test]
+    fn test_arg_parser_new() {
+        let arg_zvals = vec![None, None];
+        let parser = ArgParser::new(arg_zvals);
+        assert_eq!(parser.arg_zvals.len(), 2);
+        assert!(parser.args.is_empty());
+        assert!(parser.min_num_args.is_none());
+    }
+
+    #[test]
+    fn test_arg_parser_arg() {
+        let arg_zvals = vec![None, None];
+        let mut parser = ArgParser::new(arg_zvals);
+        let mut arg = Arg::new("test", DataType::Long);
+        parser = parser.arg(&mut arg);
+        assert_eq!(parser.args.len(), 1);
+        assert_eq!(parser.args[0].name, "test");
+        assert_eq!(parser.args[0].r#type, DataType::Long);
+    }
+
+    // TODO: test parse
+}

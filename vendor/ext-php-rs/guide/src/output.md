@@ -1,0 +1,224 @@
+# Output
+
+`ext-php-rs` provides several macros and functions for writing output to PHP's
+stdout and stderr streams. These are essential when your extension needs to
+produce output that integrates with PHP's output buffering system.
+
+## Text Output
+
+For regular text output (strings without NUL bytes), use the `php_print!` and
+`php_println!` macros. These work similarly to Rust's `print!` and `println!`
+macros.
+
+### `php_print!`
+
+Prints to PHP's standard output without a trailing newline.
+
+```rust,ignore
+use ext_php_rs::prelude::*;
+
+#[php_function]
+pub fn greet(name: &str) {
+    php_print!("Hello, {}!", name);
+}
+```
+
+### `php_println!`
+
+Prints to PHP's standard output with a trailing newline.
+
+```rust,ignore
+use ext_php_rs::prelude::*;
+
+#[php_function]
+pub fn greet(name: &str) {
+    php_println!("Hello, {}!", name);
+}
+```
+
+> **Note:** `php_print!` and `php_println!` will panic if the string contains
+> NUL bytes (`\0`). For binary-safe output, use `php_output!` or `php_write!`.
+
+## Binary-Safe Output
+
+When working with binary data that may contain NUL bytes, use the binary-safe
+output functions. These are essential for outputting raw bytes, binary file
+contents, or any data that might contain `\0` characters.
+
+### `php_output!`
+
+Writes binary data to PHP's output stream. This macro is **both binary-safe AND
+respects PHP's output buffering** (`ob_start()`). This is usually what you want
+for binary output.
+
+```rust,ignore
+use ext_php_rs::prelude::*;
+
+#[php_function]
+pub fn output_binary() -> i64 {
+    // Write binary data with NUL bytes - will be captured by ob_start()
+    let bytes_written = php_output!(b"Hello\x00World");
+    bytes_written as i64
+}
+```
+
+### `php_write!`
+
+Writes binary data directly to the SAPI output, **bypassing PHP's output
+buffering**. This macro is binary-safe but output will NOT be captured by
+`ob_start()`. The "ub" in `ub_write` stands for "unbuffered".
+
+```rust,ignore
+use ext_php_rs::prelude::*;
+
+#[php_function]
+pub fn output_binary() -> i64 {
+    // Write a byte literal
+    php_write!(b"Hello World").expect("write failed");
+
+    // Write binary data with NUL bytes (would panic with php_print!)
+    let bytes_written = php_write!(b"Hello\x00World").expect("write failed");
+
+    // Write a byte slice
+    let data: &[u8] = &[0x48, 0x65, 0x6c, 0x6c, 0x6f]; // "Hello"
+    php_write!(data).expect("write failed");
+
+    bytes_written as i64
+}
+```
+
+The macro returns a `Result<usize>` with the number of bytes written, which can
+be useful for verifying that all data was output successfully. The error case
+occurs when the SAPI's `ub_write` function is not available.
+
+## Function API
+
+In addition to macros, you can use the underlying functions directly:
+
+| Function | Binary-Safe | Output Buffering | Description |
+|----------|-------------|------------------|-------------|
+| `zend::printf()` | No | Yes | Printf-style output (used by `php_print!`) |
+| `zend::output_write()` | Yes | Yes | Binary-safe buffered output |
+| `zend::write()` | Yes | No | Binary-safe unbuffered output |
+
+### Example using functions directly
+
+```rust,ignore
+use ext_php_rs::zend::output_write;
+
+fn output_data(data: &[u8]) {
+    let bytes_written = output_write(data);
+    if bytes_written != data.len() {
+        eprintln!("Warning: incomplete write");
+    }
+}
+```
+
+## Comparison
+
+| Macro | Binary-Safe | Output Buffering | Supports Formatting |
+|-------|-------------|------------------|---------------------|
+| `php_print!` | No | Yes | Yes |
+| `php_println!` | No | Yes | Yes |
+| `php_output!` | Yes | Yes | No |
+| `php_write!` | Yes | No | No |
+
+## When to Use Each
+
+- **`php_print!` / `php_println!`**: Use for text output with format strings,
+  similar to Rust's `print!` and `println!`. Best for human-readable messages.
+
+- **`php_output!`**: Use for binary data that needs to work with PHP's output
+  buffering. This is the recommended choice for most binary output needs.
+
+- **`php_write!`**: Use when you need direct, unbuffered output that bypasses
+  PHP's output layer. Useful for low-level SAPI interaction or when output
+  buffering must be avoided.
+
+## Output Handlers
+
+An output handler changes the output before PHP sends it. It is the Rust
+equivalent of `ob_start()` with a callback. Use `zend::start_output_handler` to
+put a handler on the top of the output buffer stack.
+
+```rust,ignore
+use std::borrow::Cow;
+
+use ext_php_rs::prelude::*;
+use ext_php_rs::zend::{OutputHandlerFlags, start_output_handler};
+
+#[php_function]
+pub fn start_uppercase() -> PhpResult<()> {
+    start_output_handler("uppercase", 0, OutputHandlerFlags::Std, |input, _op| {
+        Cow::Owned(input.to_ascii_uppercase())
+    })?;
+    Ok(())
+}
+```
+
+PHP calls the handler with the buffered bytes and an `OutputOp`. The handler
+returns the bytes that PHP sends:
+
+| Return value | Result | Copy |
+|--------------|--------|------|
+| `Cow::Borrowed(input)` or `&input[..n]` | PHP sends the start of the input. | No |
+| Other `Cow::Borrowed` slice | PHP sends the slice. | One |
+| `Cow::Owned(vec)` | PHP sends the new bytes. | One |
+| An empty slice | PHP sends nothing. | No |
+
+The handler does not copy the input. A copy of the output goes to the request
+heap, because PHP keeps the output after the handler returns.
+
+PHP calls the handler at these times:
+
+- When the buffer gets to `chunk_size` bytes. A `chunk_size` of `0` sets no limit.
+- When userland calls `ob_flush()`, `ob_clean()` or `ob_end_*()`.
+- At the end of the request, with `OutputOp::Final`.
+
+`OutputHandlerFlags` tells which `ob_*()` functions userland can use on the
+handler. `OutputHandlerFlags::Std` is the default of `ob_start()`.
+
+`start_output_handler` returns an error when no request is active, for example
+during `MINIT`.
+
+If the handler panics, PHP sends the buffered bytes without a change. Then PHP
+disables the handler. PHP discards the output that the handler writes while it
+runs.
+
+## Response Headers
+
+Use these functions to change the response headers and the status code. They
+do the same work as the PHP functions in the table.
+
+| Function | PHP equivalent |
+|----------|----------------|
+| `zend::set_header(header)` | `header($header)` |
+| `zend::add_header(header)` | `header($header, false)` |
+| `zend::remove_header(name)` | `header_remove($name)` |
+| `zend::remove_all_headers()` | `header_remove()` |
+| `zend::set_response_code(code)` | `http_response_code($code)` |
+
+```rust,ignore
+use ext_php_rs::prelude::*;
+use ext_php_rs::zend::{set_header, set_response_code};
+
+#[php_function]
+pub fn moved(location: &str) -> PhpResult<()> {
+    set_header(&format!("Location: {location}"))?;
+    set_response_code(301)?;
+    Ok(())
+}
+```
+
+PHP applies its usual rules to the header. A `Location` header sets the status
+to `302`, or to `303` for a request that is not `GET` or `HEAD`. To send a
+different code, call `set_response_code` after `set_header`.
+
+Each function returns an error in these conditions:
+
+- No request is active, for example during `MINIT`.
+- A `SapiGlobals` guard is alive. The engine changes the SAPI globals, so you
+  must drop the guard first.
+- The header is empty.
+- PHP refuses the header. PHP also emits a warning when it sent the headers
+  before, or when the header has a new line or a NUL byte.

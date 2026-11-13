@@ -1,0 +1,617 @@
+//! Traits used to convert between Zend/PHP and Rust types.
+
+use crate::{
+    boxed::ZBox,
+    error::{Error, Result},
+    exception::PhpException,
+    flags::DataType,
+    types::{ZendObject, Zval},
+};
+
+/// Allows zvals to be converted into Rust types in a fallible way. Reciprocal
+/// of the [`IntoZval`] trait.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be extracted from a PHP value",
+    label = "no `FromZval` implementation for `{Self}`"
+)]
+pub trait FromZval<'a>: Sized {
+    /// The corresponding type of the implemented value in PHP.
+    const TYPE: DataType;
+
+    /// Whether a PHP argument of this type accepts `null` and may be omitted.
+    ///
+    /// Drives the `?T` nullability bit and the optional position of a
+    /// parameter declared with this type.
+    const NULLABLE: bool = false;
+
+    /// Attempts to retrieve an instance of `Self` from a reference to a
+    /// [`Zval`].
+    ///
+    /// # Parameters
+    ///
+    /// * `zval` - Zval to get value from.
+    fn from_zval(zval: &'a Zval) -> Option<Self>;
+
+    /// The value to use when a PHP argument of this type was omitted by the
+    /// caller. `None` means the argument is required.
+    ///
+    /// It must return `Some` exactly when `NULLABLE` is `true`. The macros
+    /// decide from `NULLABLE` alone which parameters PHP callers may omit.
+    #[must_use]
+    fn from_missing() -> Option<Self> {
+        None
+    }
+}
+
+impl<'a, T> FromZval<'a> for Option<T>
+where
+    T: FromZval<'a>,
+{
+    const TYPE: DataType = T::TYPE;
+    const NULLABLE: bool = true;
+
+    fn from_zval(zval: &'a Zval) -> Option<Self> {
+        T::from_zval(zval)
+            .map(Some)
+            .or_else(|| zval.dereference().is_null().then_some(None))
+    }
+
+    fn from_missing() -> Option<Self> {
+        Some(None)
+    }
+}
+
+/// Allows mutable zvals to be converted into Rust types in a fallible way.
+///
+/// If `Self` does not require the zval to be mutable to be extracted, you
+/// should implement [`FromZval`] instead, as this trait is generically
+/// implemented for any type that implements [`FromZval`].
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be used as a PHP function argument",
+    label = "no `FromZval` or `FromZvalMut` implementation for `{Self}`",
+    note = "`Option<&mut T>` is not supported for object arguments, use `&mut T`: PHP objects are handles and the caller sees every mutation",
+    note = "a variadic parameter must be spelled `&[T]` in the signature, a type alias hiding the slice is not detected"
+)]
+pub trait FromZvalMut<'a>: Sized {
+    /// The corresponding type of the implemented value in PHP.
+    const TYPE: DataType;
+
+    /// Whether a PHP argument of this type accepts `null` and may be omitted.
+    const NULLABLE: bool = false;
+
+    /// Whether a PHP argument of this type is declared pass-by-reference
+    /// (`&$arg`). Set it for types that mutate a PHP value in place, so the
+    /// engine separates the value before the call.
+    const BY_REF: bool = false;
+
+    /// Attempts to retrieve an instance of `Self` from a mutable reference to a
+    /// [`Zval`].
+    ///
+    /// # Parameters
+    ///
+    /// * `zval` - Zval to get value from.
+    fn from_zval_mut(zval: &'a mut Zval) -> Option<Self>;
+
+    /// The value to use when a PHP argument of this type was omitted by the
+    /// caller. `None` means the argument is required.
+    ///
+    /// It must return `Some` exactly when `NULLABLE` is `true`. The macros
+    /// decide from `NULLABLE` alone which parameters PHP callers may omit.
+    #[must_use]
+    fn from_missing() -> Option<Self> {
+        None
+    }
+}
+
+impl<'a, T> FromZvalMut<'a> for T
+where
+    T: FromZval<'a>,
+{
+    const TYPE: DataType = <T as FromZval>::TYPE;
+    const NULLABLE: bool = <T as FromZval>::NULLABLE;
+
+    #[inline]
+    fn from_zval_mut(zval: &'a mut Zval) -> Option<Self> {
+        Self::from_zval(zval)
+    }
+
+    #[inline]
+    fn from_missing() -> Option<Self> {
+        <T as FromZval>::from_missing()
+    }
+}
+
+/// `FromZendObject` is implemented by types which can be extracted from a Zend
+/// object.
+///
+/// Normal usage is through the helper method `ZendObject::extract`:
+///
+/// ```rust,ignore
+/// let obj: ZendObject = ...;
+/// let repr: String = obj.extract();
+/// let props: HashMap = obj.extract();
+/// ```
+///
+/// Should be functionally equivalent to casting an object to another compatible
+/// type.
+pub trait FromZendObject<'a>: Sized {
+    /// Extracts `Self` from the source `ZendObject`.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::ZvalConversion`] - If the object is not of the expected
+    ///   class.
+    /// * [`Error::InvalidProperty`] - If a property the conversion needs is
+    ///   missing.
+    ///
+    /// [`Error::ZvalConversion`]: crate::error::Error::ZvalConversion
+    /// [`Error::InvalidProperty`]: crate::error::Error::InvalidProperty
+    fn from_zend_object(obj: &'a ZendObject) -> Result<Self>;
+}
+
+/// Implemented on types which can be extracted from a mutable zend object.
+///
+/// If `Self` does not require the object to be mutable, it should implement
+/// [`FromZendObject`] instead, as this trait is generically implemented for
+/// any types that also implement [`FromZendObject`].
+pub trait FromZendObjectMut<'a>: Sized {
+    /// Extracts `Self` from the source `ZendObject`.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::ZvalConversion`] - If the object is not of the expected
+    ///   class.
+    /// * [`Error::InvalidProperty`] - If a property the conversion needs is
+    ///   missing.
+    ///
+    /// [`Error::ZvalConversion`]: crate::error::Error::ZvalConversion
+    /// [`Error::InvalidProperty`]: crate::error::Error::InvalidProperty
+    fn from_zend_object_mut(obj: &'a mut ZendObject) -> Result<Self>;
+}
+
+impl<'a, T> FromZendObjectMut<'a> for T
+where
+    T: FromZendObject<'a>,
+{
+    #[inline]
+    fn from_zend_object_mut(obj: &'a mut ZendObject) -> Result<Self> {
+        Self::from_zend_object(obj)
+    }
+}
+
+/// Implemented on types which can be converted into a Zend object. It is up to
+/// the implementation to determine the type of object which is produced.
+pub trait IntoZendObject {
+    /// Attempts to convert `self` into a Zend object.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::ZvalConversion`] - If the value has no object
+    ///   representation.
+    /// * [`Error::InvalidScope`] - If the class of the object has not been
+    ///   registered with the engine.
+    ///
+    /// [`Error::ZvalConversion`]: crate::error::Error::ZvalConversion
+    /// [`Error::InvalidScope`]: crate::error::Error::InvalidScope
+    fn into_zend_object(self) -> Result<ZBox<ZendObject>>;
+}
+
+/// Provides implementations for converting Rust primitive types into PHP zvals.
+/// Alternative to the built-in Rust [`From`] and [`TryFrom`] implementations,
+/// allowing the caller to specify whether the Zval contents will persist
+/// between requests.
+///
+/// [`TryFrom`]: std::convert::TryFrom
+pub trait IntoZval: Sized {
+    /// The corresponding type of the implemented value in PHP.
+    const TYPE: DataType;
+
+    /// Whether converting into a [`Zval`] may result in null.
+    const NULLABLE: bool;
+
+    /// Converts a Rust primitive type into a Zval. Returns a result containing
+    /// the Zval if successful.
+    ///
+    /// # Parameters
+    ///
+    /// * `persistent` - Whether the contents of the Zval will persist between
+    ///   requests.
+    ///
+    /// # Errors
+    ///
+    /// Implementations return the error that describes their failure, for
+    /// example:
+    ///
+    /// * [`Error::IntegerOverflow`] - If the value does not fit in a PHP
+    ///   integer.
+    /// * [`Error::InvalidCString`] - If a string in the value contains a NUL
+    ///   byte.
+    ///
+    /// [`Error::IntegerOverflow`]: crate::error::Error::IntegerOverflow
+    /// [`Error::InvalidCString`]: crate::error::Error::InvalidCString
+    fn into_zval(self, persistent: bool) -> Result<Zval> {
+        let mut zval = Zval::new();
+        self.set_zval(&mut zval, persistent)?;
+        Ok(zval)
+    }
+
+    /// Sets the content of a pre-existing zval. Returns a result containing
+    /// nothing if setting the content was successful.
+    ///
+    /// # Parameters
+    ///
+    /// * `zv` - The Zval to set the content of.
+    /// * `persistent` - Whether the contents of the Zval will persist between
+    ///   requests.
+    ///
+    /// # Errors
+    ///
+    /// Implementations return the error that describes their failure, for
+    /// example:
+    ///
+    /// * [`Error::IntegerOverflow`] - If the value does not fit in a PHP
+    ///   integer.
+    /// * [`Error::InvalidCString`] - If a string in the value contains a NUL
+    ///   byte.
+    ///
+    /// [`Error::IntegerOverflow`]: crate::error::Error::IntegerOverflow
+    /// [`Error::InvalidCString`]: crate::error::Error::InvalidCString
+    fn set_zval(self, zv: &mut Zval, persistent: bool) -> Result<()>;
+}
+
+impl IntoZval for () {
+    const TYPE: DataType = DataType::Void;
+    const NULLABLE: bool = true;
+
+    #[inline]
+    fn set_zval(self, zv: &mut Zval, _: bool) -> Result<()> {
+        zv.set_null();
+        Ok(())
+    }
+}
+
+impl<T> IntoZval for Option<T>
+where
+    T: IntoZval,
+{
+    const TYPE: DataType = T::TYPE;
+    const NULLABLE: bool = true;
+
+    #[inline]
+    fn set_zval(self, zv: &mut Zval, persistent: bool) -> Result<()> {
+        if let Some(val) = self {
+            val.set_zval(zv, persistent)
+        } else {
+            zv.set_null();
+            Ok(())
+        }
+    }
+}
+
+impl<T, E> IntoZval for std::result::Result<T, E>
+where
+    T: IntoZval,
+    E: Into<PhpException>,
+{
+    const TYPE: DataType = T::TYPE;
+    const NULLABLE: bool = T::NULLABLE;
+
+    fn set_zval(self, zv: &mut Zval, persistent: bool) -> Result<()> {
+        match self {
+            Ok(val) => val.set_zval(zv, persistent),
+            Err(e) => {
+                let ex: PhpException = e.into();
+                ex.throw();
+                Err(Error::pending_exception().unwrap_or(Error::Callable))
+            }
+        }
+    }
+}
+
+/// An object-safe version of the [`IntoZval`] trait.
+///
+/// This trait is automatically implemented on any type that implements both
+/// [`IntoZval`] and [`Clone`]. You avoid implementing this trait directly,
+/// rather implement these two other traits.
+pub trait IntoZvalDyn {
+    /// Converts a Rust primitive type into a Zval. Returns a result containing
+    /// the Zval if successful. `self` is cloned before being converted into
+    /// a zval.
+    ///
+    /// # Parameters
+    ///
+    /// * `persistent` - Whether the contents of the Zval will persist between
+    ///   requests.
+    ///
+    /// # Errors
+    ///
+    /// If the conversion fails, an [`Error`] is returned.
+    ///
+    /// [`Error`]: crate::error::Error
+    fn as_zval(&self, persistent: bool) -> Result<Zval>;
+
+    /// Returns the PHP type of the type.
+    fn get_type(&self) -> DataType;
+
+    /// Returns the PHP stub representation of this value.
+    ///
+    /// This is used when generating PHP stub files for IDE autocompletion.
+    /// The returned string should be a valid PHP literal.
+    fn stub_value(&self) -> String {
+        // Default implementation - convert to zval and format
+        match self.as_zval(false) {
+            Ok(zval) => zval_to_stub(&zval),
+            Err(_) => "null".to_string(),
+        }
+    }
+}
+
+/// Converts a Zval to its PHP stub representation.
+#[must_use]
+#[allow(clippy::match_same_arms)]
+pub fn zval_to_stub(zval: &Zval) -> String {
+    use crate::flags::DataType;
+
+    match zval.get_type() {
+        DataType::Null | DataType::Undef => "null".to_string(),
+        DataType::True => "true".to_string(),
+        DataType::False => "false".to_string(),
+        DataType::Long => zval
+            .long()
+            .map_or_else(|| "null".to_string(), |v| v.to_string()),
+        DataType::Double => zval
+            .double()
+            .map_or_else(|| "null".to_string(), |v| v.to_string()),
+        DataType::String => {
+            if let Some(s) = zval.str() {
+                let escaped = s
+                    .replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t");
+                format!("'{escaped}'")
+            } else {
+                "null".to_string()
+            }
+        }
+        DataType::Array => {
+            #[allow(clippy::explicit_iter_loop)]
+            if let Some(arr) = zval.array() {
+                // Check if array has sequential numeric keys starting from 0
+                let is_sequential = arr.iter().enumerate().all(|(i, (key, _))| {
+                    matches!(key, crate::types::ArrayKey::Long(idx) if i64::try_from(i).is_ok_and(|ii| idx == ii))
+                });
+
+                let mut parts = Vec::new();
+                for (key, val) in arr.iter() {
+                    let val_str = zval_to_stub(val);
+                    if is_sequential {
+                        parts.push(val_str);
+                    } else {
+                        match key {
+                            crate::types::ArrayKey::Long(idx) => {
+                                parts.push(format!("{idx} => {val_str}"));
+                            }
+                            crate::types::ArrayKey::String(key) => {
+                                let key_escaped = key.replace('\\', "\\\\").replace('\'', "\\'");
+                                parts.push(format!("'{key_escaped}' => {val_str}"));
+                            }
+                            crate::types::ArrayKey::Str(key) => {
+                                let key_escaped = key.replace('\\', "\\\\").replace('\'', "\\'");
+                                parts.push(format!("'{key_escaped}' => {val_str}"));
+                            }
+                            crate::types::ArrayKey::ZendString(key) => {
+                                let decoded = match key.as_str() {
+                                    Ok(s) => std::borrow::Cow::Borrowed(s),
+                                    Err(_) => String::from_utf8_lossy(key.as_bytes()),
+                                };
+                                let key_escaped =
+                                    decoded.replace('\\', "\\\\").replace('\'', "\\'");
+                                parts.push(format!("'{key_escaped}' => {val_str}"));
+                            }
+                        }
+                    }
+                }
+                format!("[{}]", parts.join(", "))
+            } else {
+                "[]".to_string()
+            }
+        }
+        _ => "null".to_string(),
+    }
+}
+
+impl<T: IntoZval + Clone> IntoZvalDyn for T {
+    fn as_zval(&self, persistent: bool) -> Result<Zval> {
+        self.clone().into_zval(persistent)
+    }
+
+    fn get_type(&self) -> DataType {
+        Self::TYPE
+    }
+}
+
+impl IntoZvalDyn for Zval {
+    fn as_zval(&self, _persistent: bool) -> Result<Zval> {
+        Ok(self.shallow_clone())
+    }
+
+    fn get_type(&self) -> DataType {
+        self.get_type()
+    }
+}
+
+/// Renders a Rust value as PHP source, for the `default_value` of a parameter
+/// and for stub files.
+///
+/// The rendering never touches the engine, so it can run while the module
+/// entry is built, before the Zend allocator exists. PHP reads the text back
+/// with `zend_get_default_from_internal_arg_info`, which accepts `null`,
+/// `true`, `false`, integers, quoted strings, `[]` and constant expressions.
+pub trait StubLiteral {
+    /// The PHP source text of this value.
+    fn stub_literal(&self) -> String;
+}
+
+macro_rules! stub_literal_display {
+    ($($ty:ty),*) => {
+        $(
+            impl StubLiteral for $ty {
+                fn stub_literal(&self) -> String {
+                    self.to_string()
+                }
+            }
+        )*
+    };
+}
+
+stub_literal_display!(bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
+
+macro_rules! stub_literal_float {
+    ($($ty:ty),*) => {
+        $(
+            impl StubLiteral for $ty {
+                fn stub_literal(&self) -> String {
+                    if self.is_nan() {
+                        "NAN".to_string()
+                    } else if self.is_infinite() {
+                        if *self > 0.0 { "INF" } else { "-INF" }.to_string()
+                    } else {
+                        format!("{self:?}")
+                    }
+                }
+            }
+        )*
+    };
+}
+
+stub_literal_float!(f32, f64);
+
+impl StubLiteral for str {
+    fn stub_literal(&self) -> String {
+        let escaped = self.replace('\\', "\\\\").replace('\'', "\\'");
+        format!("'{escaped}'")
+    }
+}
+
+impl StubLiteral for &str {
+    fn stub_literal(&self) -> String {
+        (**self).stub_literal()
+    }
+}
+
+impl StubLiteral for String {
+    fn stub_literal(&self) -> String {
+        self.as_str().stub_literal()
+    }
+}
+
+impl StubLiteral for std::borrow::Cow<'_, str> {
+    fn stub_literal(&self) -> String {
+        self.as_ref().stub_literal()
+    }
+}
+
+impl<T: StubLiteral> StubLiteral for Option<T> {
+    fn stub_literal(&self) -> String {
+        self.as_ref()
+            .map_or_else(|| "null".to_string(), StubLiteral::stub_literal)
+    }
+}
+
+impl<T: StubLiteral> StubLiteral for [T] {
+    fn stub_literal(&self) -> String {
+        let items: Vec<String> = self.iter().map(StubLiteral::stub_literal).collect();
+        format!("[{}]", items.join(", "))
+    }
+}
+
+impl<T: StubLiteral> StubLiteral for Vec<T> {
+    fn stub_literal(&self) -> String {
+        self.as_slice().stub_literal()
+    }
+}
+
+impl<T: StubLiteral, const N: usize> StubLiteral for [T; N] {
+    fn stub_literal(&self) -> String {
+        self.as_slice().stub_literal()
+    }
+}
+
+impl<K: StubLiteral, V: StubLiteral, S> StubLiteral for std::collections::HashMap<K, V, S> {
+    fn stub_literal(&self) -> String {
+        let mut entries: Vec<String> = self
+            .iter()
+            .map(|(key, value)| format!("{} => {}", key.stub_literal(), value.stub_literal()))
+            .collect();
+        entries.sort();
+        format!("[{}]", entries.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{PhpRef, Separated, ZendHashTable, ZendObject};
+
+    const _: () = {
+        assert!(<Option<i64> as FromZval>::NULLABLE);
+        assert!(<Option<i64> as FromZvalMut>::NULLABLE);
+        assert!(!<i64 as FromZval>::NULLABLE);
+        assert!(!<i64 as FromZvalMut>::NULLABLE);
+        assert!(!<i64 as FromZvalMut>::BY_REF);
+        assert!(!<&Zval as FromZvalMut>::BY_REF);
+        assert!(<&mut Zval as FromZvalMut>::BY_REF);
+        assert!(<PhpRef<'_> as FromZvalMut>::BY_REF);
+        assert!(!<Separated<'_> as FromZvalMut>::BY_REF);
+        assert!(<&mut ZendHashTable as FromZvalMut>::BY_REF);
+        assert!(!<&mut ZendObject as FromZvalMut>::BY_REF);
+    };
+
+    #[test]
+    fn stub_literals_are_php_source() {
+        assert_eq!(42_i32.stub_literal(), "42");
+        assert_eq!(true.stub_literal(), "true");
+        assert_eq!(1.5_f64.stub_literal(), "1.5");
+        assert_eq!(3.0_f64.stub_literal(), "3.0");
+        assert_eq!(f64::INFINITY.stub_literal(), "INF");
+        assert_eq!("it's".stub_literal(), "'it\\'s'");
+        assert_eq!(String::from("a\\b").stub_literal(), "'a\\\\b'");
+        assert_eq!(None::<i64>.stub_literal(), "null");
+        assert_eq!(Some("x".to_string()).stub_literal(), "'x'");
+        assert_eq!(Vec::<i64>::new().stub_literal(), "[]");
+        assert_eq!(vec![1, 2].stub_literal(), "[1, 2]");
+        let map: std::collections::HashMap<&str, i64> = [("b", 2), ("a", 1)].into();
+        assert_eq!(map.stub_literal(), "['a' => 1, 'b' => 2]");
+    }
+
+    #[test]
+    fn omitted_argument_is_none_for_option_and_missing_otherwise() {
+        assert_eq!(<Option<i64> as FromZvalMut>::from_missing(), Some(None));
+        assert_eq!(
+            <Option<Option<i64>> as FromZvalMut>::from_missing(),
+            Some(None)
+        );
+        assert_eq!(<i64 as FromZvalMut>::from_missing(), None);
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn option_rejects_a_value_the_inner_type_rejects() {
+        assert_eq!(<Option<i64> as FromZval>::from_zval(&Zval::from(1.5)), None);
+    }
+
+    #[test]
+    #[cfg(feature = "embed")]
+    fn option_reads_null_as_none_unless_the_inner_type_accepts_null() {
+        assert_eq!(
+            <Option<i64> as FromZval>::from_zval(&Zval::new()),
+            Some(None)
+        );
+        assert_eq!(
+            <Option<Option<i64>> as FromZval>::from_zval(&Zval::new()),
+            Some(Some(None))
+        );
+    }
+}

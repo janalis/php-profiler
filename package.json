@@ -1,0 +1,6 @@
+{
+  "name": "php-profiler-release-tools",
+  "private": true,
+  "scripts": {"release:plan": "node scripts/release-plan.mjs"},
+  "devDependencies": {"semver": "7.7.2"}
+}

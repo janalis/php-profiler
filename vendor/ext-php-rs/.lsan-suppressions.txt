@@ -1,0 +1,7 @@
+# PHP leaks persistent allocations at embed shutdown by design; php-src's own
+# run-tests gave up on detect_leaks there (run-tests.php:2685).
+leak:libphp
+# Intentional: these tests trigger a PHP bailout on purpose, so their own
+# locals are never dropped.
+leak:test_memory_leak
+leak:exception::tests::test_throw

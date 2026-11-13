@@ -1,0 +1,794 @@
+{
+  "schema_version": 2,
+  "contexts": {
+    "php83-nts": {
+      "php_zts": false,
+      "php_version_id": 80336,
+      "php_int_size": 8,
+      "native_compile_commands": {
+        "bridge-unit.c": [
+          "Ubuntu",
+          "clang",
+          "version",
+          "19.1.1",
+          "(1ubuntu1~24.04.2)",
+          "/usr/lib/llvm-19/bin/clang",
+          "-O0",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-fPIC",
+          "-g",
+          "-gdwarf-4",
+          "-fno-omit-frame-pointer",
+          "-mno-omit-leaf-frame-pointer",
+          "-m64",
+          "--target=x86_64-unknown-linux-gnu",
+          "-I",
+          "/usr/local/include/php",
+          "-I",
+          "/usr/local/include/php/main",
+          "-I",
+          "/usr/local/include/php/TSRM",
+          "-I",
+          "/usr/local/include/php/Zend",
+          "-I",
+          "/usr/local/include/php/ext",
+          "-I",
+          "/usr/local/include/php/ext/date/lib",
+          "-finstrument-functions",
+          "-std=c11",
+          "-D",
+          "PROFILER_GUARD_UNIT_PRESENT",
+          "-D",
+          "PROFILER_SAMPLING_TEST_TRANSPORTS",
+          "-fpass-plugin=/usr/lib/mull-ir-frontend-19",
+          "-g",
+          "-grecord-command-line",
+          "-fsanitize=array-bounds",
+          "-fsanitize-trap=array-bounds",
+          "-c",
+          "../../tests/native/bridge-unit.c"
+        ],
+        "sampling-unit.c": [
+          "Ubuntu",
+          "clang",
+          "version",
+          "19.1.1",
+          "(1ubuntu1~24.04.2)",
+          "/usr/lib/llvm-19/bin/clang",
+          "-O0",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-fPIC",
+          "-g",
+          "-gdwarf-4",
+          "-fno-omit-frame-pointer",
+          "-mno-omit-leaf-frame-pointer",
+          "-m64",
+          "--target=x86_64-unknown-linux-gnu",
+          "-I",
+          "/usr/local/include/php",
+          "-I",
+          "/usr/local/include/php/main",
+          "-I",
+          "/usr/local/include/php/TSRM",
+          "-I",
+          "/usr/local/include/php/Zend",
+          "-I",
+          "/usr/local/include/php/ext",
+          "-I",
+          "/usr/local/include/php/ext/date/lib",
+          "-finstrument-functions",
+          "-std=c11",
+          "-D",
+          "PROFILER_GUARD_UNIT_PRESENT",
+          "-D",
+          "PROFILER_SAMPLING_TEST_TRANSPORTS",
+          "-fpass-plugin=/usr/lib/mull-ir-frontend-19",
+          "-g",
+          "-grecord-command-line",
+          "-fsanitize=array-bounds",
+          "-fsanitize-trap=array-bounds",
+          "-c",
+          "../../tests/native/sampling-unit.c"
+        ]
+      },
+      "native_fixture_symbols": [
+        "__cyg_profile_func_enter",
+        "__cyg_profile_func_exit",
+        "__wrap___sysconf",
+        "__wrap__emalloc",
+        "__wrap_clock_gettime",
+        "__wrap_expand_filepath",
+        "__wrap_php_check_open_basedir_ex",
+        "__wrap_php_json_decode_ex",
+        "__wrap_profiler_fiber_cleanup",
+        "__wrap_profiler_fiber_destroy",
+        "__wrap_profiler_resolve_path",
+        "__wrap_profiler_sampling_closure_identity",
+        "__wrap_profiler_sampling_observe",
+        "__wrap_pthread_atfork",
+        "__wrap_pthread_attr_destroy",
+        "__wrap_pthread_attr_init",
+        "__wrap_pthread_attr_setguardsize",
+        "__wrap_pthread_attr_setsigmask_np",
+        "__wrap_pthread_attr_setstacksize",
+        "__wrap_pthread_cond_destroy",
+        "__wrap_pthread_cond_init",
+        "__wrap_pthread_cond_timedwait",
+        "__wrap_pthread_condattr_init",
+        "__wrap_pthread_condattr_setclock",
+        "__wrap_pthread_create",
+        "__wrap_pthread_join",
+        "__wrap_pthread_mutex_destroy",
+        "__wrap_pthread_mutex_init",
+        "__wrap_pthread_mutex_lock",
+        "__wrap_pthread_mutex_unlock",
+        "__wrap_sched_yield",
+        "__wrap_sysconf",
+        "__wrap_zend_get_op_array_extension_handle",
+        "__wrap_zend_observer_fcall_register"
+      ],
+      "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+      "rustflags": "",
+      "cargo_encoded_rustflags": "",
+      "system": "Linux",
+      "machine": "x86_64",
+      "compiler_version": "Ubuntu clang version 19.1.1 (1ubuntu1~24.04.2)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-19/bin\n",
+      "mull_version": "mull-runner 0.34.2\n\nMull: Practical mutation testing and fault injection for C and C++\nHome: https://mull-project.com\nLLVM: 19.1.1\n",
+      "compiler_sha256": "f6d5286a52de10b1e3e8841457c9903a1ea28f222ac0f58cd616697d0dcd9db3",
+      "plugin_sha256": "9f714b697f713b59b6a30a92b878e7d23d9cdbc43dfe1912757c3aadd70a5f4e",
+      "compiler_flags": [
+        "-fpass-plugin=/usr/lib/mull-ir-frontend-19",
+        "-g",
+        "-grecord-command-line",
+        "-fsanitize=array-bounds",
+        "-fsanitize-trap=array-bounds"
+      ],
+      "libc_sha256": "3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf"
+    },
+    "php83-zts": {
+      "php_zts": true,
+      "php_version_id": 80336,
+      "php_int_size": 8,
+      "native_compile_commands": {
+        "bridge-unit.c": [
+          "Ubuntu",
+          "clang",
+          "version",
+          "19.1.1",
+          "(1ubuntu1~24.04.2)",
+          "/usr/lib/llvm-19/bin/clang",
+          "-O0",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-fPIC",
+          "-g",
+          "-gdwarf-4",
+          "-fno-omit-frame-pointer",
+          "-mno-omit-leaf-frame-pointer",
+          "-m64",
+          "--target=x86_64-unknown-linux-gnu",
+          "-I",
+          "/usr/local/include/php",
+          "-I",
+          "/usr/local/include/php/main",
+          "-I",
+          "/usr/local/include/php/TSRM",
+          "-I",
+          "/usr/local/include/php/Zend",
+          "-I",
+          "/usr/local/include/php/ext",
+          "-I",
+          "/usr/local/include/php/ext/date/lib",
+          "-finstrument-functions",
+          "-std=c11",
+          "-D",
+          "PROFILER_GUARD_UNIT_PRESENT",
+          "-D",
+          "PROFILER_SAMPLING_TEST_TRANSPORTS",
+          "-fpass-plugin=/usr/lib/mull-ir-frontend-19",
+          "-g",
+          "-grecord-command-line",
+          "-fsanitize=array-bounds",
+          "-fsanitize-trap=array-bounds",
+          "-c",
+          "../../tests/native/bridge-unit.c"
+        ],
+        "sampling-unit.c": [
+          "Ubuntu",
+          "clang",
+          "version",
+          "19.1.1",
+          "(1ubuntu1~24.04.2)",
+          "/usr/lib/llvm-19/bin/clang",
+          "-O0",
+          "-ffunction-sections",
+          "-fdata-sections",
+          "-fPIC",
+          "-g",
+          "-gdwarf-4",
+          "-fno-omit-frame-pointer",
+          "-mno-omit-leaf-frame-pointer",
+          "-m64",
+          "--target=x86_64-unknown-linux-gnu",
+          "-I",
+          "/usr/local/include/php",
+          "-I",
+          "/usr/local/include/php/main",
+          "-I",
+          "/usr/local/include/php/TSRM",
+          "-I",
+          "/usr/local/include/php/Zend",
+          "-I",
+          "/usr/local/include/php/ext",
+          "-I",
+          "/usr/local/include/php/ext/date/lib",
+          "-finstrument-functions",
+          "-std=c11",
+          "-D",
+          "PROFILER_GUARD_UNIT_PRESENT",
+          "-D",
+          "PROFILER_SAMPLING_TEST_TRANSPORTS",
+          "-fpass-plugin=/usr/lib/mull-ir-frontend-19",
+          "-g",
+          "-grecord-command-line",
+          "-fsanitize=array-bounds",
+          "-fsanitize-trap=array-bounds",
+          "-c",
+          "../../tests/native/sampling-unit.c"
+        ]
+      },
+      "native_fixture_symbols": [
+        "__cyg_profile_func_enter",
+        "__cyg_profile_func_exit",
+        "__wrap___sysconf",
+        "__wrap__emalloc",
+        "__wrap_clock_gettime",
+        "__wrap_expand_filepath",
+        "__wrap_php_check_open_basedir_ex",
+        "__wrap_php_json_decode_ex",
+        "__wrap_profiler_fiber_cleanup",
+        "__wrap_profiler_fiber_destroy",
+        "__wrap_profiler_resolve_path",
+        "__wrap_profiler_sampling_closure_identity",
+        "__wrap_profiler_sampling_observe",
+        "__wrap_pthread_atfork",
+        "__wrap_pthread_attr_destroy",
+        "__wrap_pthread_attr_init",
+        "__wrap_pthread_attr_setguardsize",
+        "__wrap_pthread_attr_setsigmask_np",
+        "__wrap_pthread_attr_setstacksize",
+        "__wrap_pthread_cond_destroy",
+        "__wrap_pthread_cond_init",
+        "__wrap_pthread_cond_timedwait",
+        "__wrap_pthread_condattr_init",
+        "__wrap_pthread_condattr_setclock",
+        "__wrap_pthread_create",
+        "__wrap_pthread_join",
+        "__wrap_pthread_mutex_destroy",
+        "__wrap_pthread_mutex_init",
+        "__wrap_pthread_mutex_lock",
+        "__wrap_pthread_mutex_unlock",
+        "__wrap_sched_yield",
+        "__wrap_sysconf",
+        "__wrap_ts_allocate_id",
+        "__wrap_zend_get_op_array_extension_handle",
+        "__wrap_zend_observer_fcall_register"
+      ],
+      "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+      "rustflags": "",
+      "cargo_encoded_rustflags": "",
+      "system": "Linux",
+      "machine": "x86_64",
+      "compiler_version": "Ubuntu clang version 19.1.1 (1ubuntu1~24.04.2)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-19/bin\n",
+      "mull_version": "mull-runner 0.34.2\n\nMull: Practical mutation testing and fault injection for C and C++\nHome: https://mull-project.com\nLLVM: 19.1.1\n",
+      "compiler_sha256": "f6d5286a52de10b1e3e8841457c9903a1ea28f222ac0f58cd616697d0dcd9db3",
+      "plugin_sha256": "9f714b697f713b59b6a30a92b878e7d23d9cdbc43dfe1912757c3aadd70a5f4e",
+      "compiler_flags": [
+        "-fpass-plugin=/usr/lib/mull-ir-frontend-19",
+        "-g",
+        "-grecord-command-line",
+        "-fsanitize=array-bounds",
+        "-fsanitize-trap=array-bounds"
+      ],
+      "libc_sha256": "3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf"
+    }
+  },
+  "dependency_sha256": {
+    "Cargo.lock": "5e0e2669bd0cb3f745220f30e7bf943f0da7889a42a7d89555101530098a49bc",
+    "Cargo.toml": "7e6943ff9d25ff6055a2b15f0a43582fa5cd28486225f7635aa47fd5f67741b8",
+    "crates/php-profiler/Cargo.toml": "19e248ab72fd253f62f7c8c67a8c31f7edc867bec0c72b63f3d28213a9b3f46d",
+    "crates/php-profiler/build.rs": "07823f20ed6872a0c228feb50524e72d0b33baf6ba4346e25edaa97890716c4a",
+    "crates/php-profiler/src/bridge.c": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+    "crates/php-profiler/src/lib.rs": "f998b0488c1e18e5eb065e9171987f5fd5376584b0c5ec20d49cc6225dc891cf",
+    "crates/php-profiler/src/sampling.c": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+    "crates/php-profiler/src/sampling.rs": "48a46132c3138c7d127c2df01ade8398de56950ffc0834cb22df088be4d22fa0",
+    "crates/php-profiler/src/storage.rs": "21ce23addb6bbcf90f581ca7ac5da4bda42cd505bebb396e747c50005da48df0",
+    "crates/profiler-core/Cargo.toml": "ae20ca9568102c309e7ca4ed25af37a1872dbc16672f3523211ff639604a674b",
+    "crates/profiler-core/src/budget.rs": "139372b188ae01ed8c94cac971e8ba682db7534373ac044d9c5f5e280b65a088",
+    "crates/profiler-core/src/index.rs": "8d4c994eabfbd6e327fb12f138bad5d2c9a80e35a3d47ca26df149717213b448",
+    "crates/profiler-core/src/lib.rs": "28ce4b77e417eb4cc7d1bed277a54a4efef4b59a0ab30bd2fd775c0b75c6a306",
+    "crates/profiler-core/src/sampling.rs": "38f447e02e78151ded334c16804d12b85ddfa145fb5468e64a1adbe7b24e6a7b",
+    "crates/profiler-core/src/serialization.rs": "cabe9fabdaf9ee2386d4222abe34c2387d8fae92a5e71ca65a3d2f2739336b8f",
+    "crates/profiler-core/src/storage.rs": "6b404604930949fe9e0537670fef52e5ee8b69c76796c420aeb8e2e79526eee3",
+    "docs/mutation-equivalence.md": "4c0c1f73103347d27e8c412ac3c093204f31ad6976171e9651cf6c850ada8c43",
+    "scripts/link-native-faults.sh": "17402752cd23da83b64385dedaf31ef6146e62a5844de0127d6370c781aafecb",
+    "tests/native/bailout-fault.c": "05ba2b6fe5fa920e56cfdc28a0fcd4ebfe07ed3b66821a60b711d6956113e22d",
+    "tests/native/bridge-unit.c": "0203b86fb5f9d2f687db3a94dcde440dd732e5d3e18a38ea4a36d979a0f9f614",
+    "tests/native/frames-native.c": "321edc1b83fb1e073ec1df3b35b97d72c178dc8fea053b41eb68525f5bdf9aa0",
+    "tests/native/sampling-lifecycle-native.c": "8ba359fbefbc0033e9bae0ebdb7983058334222c1ce0d89fa991dae8d29cf35c",
+    "tests/native/sampling-unit.c": "df459c1b6593678636f3d17562c58a4df698630f77c92c767593a132ed5395a8",
+    "tests/support/adapter-contract.rs": "995463c6e138da62bba249e14e0eee0dc4b254b7819bdf3f225913246854dc2f",
+    "tests/support/sampling-adapter-contract.rs": "5fa261763c3c28e1f3cadb5d0e2aefb8e8f25ded359024933fecd3bbba763a7e"
+  },
+  "equivalents": [
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 78,
+          "column": 64
+        },
+        "end": {
+          "line": 78,
+          "column": 65
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#actual-noncanonical-boolean-stores",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 78,
+          "column": 104
+        },
+        "end": {
+          "line": 78,
+          "column": 105
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#actual-noncanonical-boolean-stores",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 124,
+          "column": 43
+        },
+        "end": {
+          "line": 124,
+          "column": 44
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#actual-noncanonical-boolean-stores",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 154,
+          "column": 73
+        },
+        "end": {
+          "line": 154,
+          "column": 74
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#actual-noncanonical-boolean-stores",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 250,
+          "column": 80
+        },
+        "end": {
+          "line": 250,
+          "column": 81
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#resolver-nonzero-success-value",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_init_const",
+      "location": {
+        "start": {
+          "line": 47,
+          "column": 14
+        },
+        "end": {
+          "line": 47,
+          "column": 22
+        }
+      },
+      "replacement": "42",
+      "proof": "docs/mutation-equivalence.md#c-closure-uid-allocator-initial-cas-guess-replaced-with-42",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_init_const",
+      "location": {
+        "start": {
+          "line": 234,
+          "column": 19
+        },
+        "end": {
+          "line": 234,
+          "column": 26
+        }
+      },
+      "replacement": "42",
+      "proof": "docs/mutation-equivalence.md#actual-noncanonical-boolean-stores",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "733c7ec9004c5d5ce8d044835af8fc89d95dbf41c5722efc9ed941754ccfc759",
+      "mutatorName": "cxx_remove_void_call",
+      "location": {
+        "start": {
+          "line": 39,
+          "column": 5
+        },
+        "end": {
+          "line": 39,
+          "column": 25
+        }
+      },
+      "replacement": "",
+      "proof": "docs/mutation-equivalence.md#nts-deferred-bailout-publication-with-an-empty-publisher",
+      "contexts": [
+        "php83-nts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_add_to_sub",
+      "location": {
+        "start": {
+          "line": 178,
+          "column": 23
+        },
+        "end": {
+          "line": 178,
+          "column": 24
+        }
+      },
+      "replacement": "-",
+      "proof": "docs/mutation-equivalence.md#unsigned-ring-arithmetic",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 126,
+          "column": 29
+        },
+        "end": {
+          "line": 126,
+          "column": 30
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#sampler-false-publications-worker-and-request-lifetime",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 200,
+          "column": 39
+        },
+        "end": {
+          "line": 200,
+          "column": 40
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#overwritten-initial-truncation-output",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 209,
+          "column": 58
+        },
+        "end": {
+          "line": 209,
+          "column": 59
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#nonzero-stack-truncation-and-unused-frame-classification",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 211,
+          "column": 84
+        },
+        "end": {
+          "line": 211,
+          "column": 85
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#nonzero-stack-truncation-and-unused-frame-classification",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 219,
+          "column": 30
+        },
+        "end": {
+          "line": 219,
+          "column": 31
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#nonzero-stack-truncation-and-unused-frame-classification",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 243,
+          "column": 31
+        },
+        "end": {
+          "line": 243,
+          "column": 32
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#nonzero-stack-truncation-and-unused-frame-classification",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 250,
+          "column": 46
+        },
+        "end": {
+          "line": 250,
+          "column": 47
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#nonzero-stack-truncation-and-unused-frame-classification",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 290,
+          "column": 15
+        },
+        "end": {
+          "line": 290,
+          "column": 16
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#sampler-registration-false-publication",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 312,
+          "column": 136
+        },
+        "end": {
+          "line": 312,
+          "column": 137
+        }
+      },
+      "replacement": "= 42;",
+      "proof": "docs/mutation-equivalence.md#sampler-false-publications-worker-and-request-lifetime",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_eq_to_ne",
+      "location": {
+        "start": {
+          "line": 243,
+          "column": 46
+        },
+        "end": {
+          "line": 243,
+          "column": 48
+        }
+      },
+      "replacement": "!=",
+      "proof": "docs/mutation-equivalence.md#nonzero-stack-truncation-and-unused-frame-classification",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_init_const",
+      "location": {
+        "start": {
+          "line": 233,
+          "column": 22
+        },
+        "end": {
+          "line": 233,
+          "column": 29
+        }
+      },
+      "replacement": "42",
+      "proof": "docs/mutation-equivalence.md#unavailable-service-initializer",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_replace_scalar_call",
+      "location": {
+        "start": {
+          "line": 124,
+          "column": 13
+        },
+        "end": {
+          "line": 124,
+          "column": 26
+        }
+      },
+      "replacement": "42",
+      "proof": "docs/mutation-equivalence.md#retry-yield-conditional-valid-native-unreachable-arm",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ],
+      "scope_assumptions": [
+        "valid privately owned joinable worker and sole serialized non-worker joiner",
+        "pinned libc bytes and conforming Linux NULL-timeout futex behavior",
+        "no external detach/join/cancellation or invalid embedding lifecycle",
+        "no manufactured native errors or scheduling-equivalence claim for private fault injection"
+      ]
+    },
+    {
+      "source": "crates/php-profiler/src/sampling.c",
+      "source_sha256": "0ce32a4685e45e73dd69a758975d1188cb5aeccf24542932f8afe50f51cac8d6",
+      "mutatorName": "cxx_replace_scalar_call",
+      "location": {
+        "start": {
+          "line": 159,
+          "column": 5
+        },
+        "end": {
+          "line": 159,
+          "column": 42
+        }
+      },
+      "replacement": "42",
+      "proof": "docs/mutation-equivalence.md#pinned-glibc-condition-attribute-destructor",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ]
+    }
+  ]
+}
