@@ -10,6 +10,7 @@ fn real_zend_runtime() {
         // Private callback contracts require a real, initialized Zend host on
         // every platform. This opt-in affects only this debug test artifact.
         .env("PROFILER_ADAPTER_CONTRACT_TEST", "1")
+        .env("PROFILER_C_UNIT_BOUNDARIES", "1")
         .env("PROFILER_SAMPLING_UNIT", "1")
         .current_dir(&root)
         .status()
@@ -48,6 +49,7 @@ fn real_zend_runtime() {
     let contracts = Command::new("python3")
         .arg("scripts/adapter-contract-tests.py")
         .env("PROFILER_CONTRACT_EXTENSION", &extension)
+        .env("PROFILER_C_UNIT_BOUNDARIES", "1")
         .current_dir(&root)
         .status()
         .expect("launch real Zend private adapter contracts");

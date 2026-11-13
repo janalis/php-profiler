@@ -20,7 +20,8 @@ RUN sed -i -E 's#http://(archive.ubuntu.com/ubuntu/|security.ubuntu.com/ubuntu/)
 COPY --from=php_sdk /usr/local /usr/local
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
-ENV PATH="/usr/local/cargo/bin:${PATH}" RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:${PATH}" RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
+    RUSTUP_TOOLCHAIN=1.99.1-x86_64-unknown-linux-gnu
 RUN curl --fail --show-error --location https://github.com/mull-project/mull/releases/download/0.34.2/Mull-19-0.34.2-LLVM-19.1.1-ubuntu-amd64-24.04.deb -o /tmp/mull.deb \
     && echo '755955a2253290ec2d5d23376c0bffaa42152b806533df1ac581081ae27a0b2b  /tmp/mull.deb' | sha256sum --check \
     && apt-get update && apt-get install -y /tmp/mull.deb && rm -rf /var/lib/apt/lists/* \
