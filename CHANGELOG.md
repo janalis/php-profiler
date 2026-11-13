@@ -4,6 +4,13 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.1] - 2026-11-13
+
+### Commits
+
+- fix: validate PIE packaging and automatic release candidates (#5)
+- feat: add local Rust PHP profiler and repository quality tooling
+
 ### Added
 
 - Local Rust PHP profiler with runtime control, call graphs, timelines, JSON reports, and supported-platform sampling.
@@ -28,4 +35,4 @@ All notable changes are documented here using Semantic Versioning.
 - Renew the audited native mutation coordinates after formatting, preserving raw outcomes.
 - Update pinned GitHub Actions and release version tooling.
 
-No version has been published. See the README and compatibility documentation for measurement and platform limitations.
+See the README and compatibility documentation for measurement and platform limitations.
