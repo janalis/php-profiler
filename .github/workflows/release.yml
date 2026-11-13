@@ -9,17 +9,24 @@ concurrency:
   group: alpha-release
   cancel-in-progress: false
 jobs:
-  candidate:
+  release:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+      (github.event.workflow_run.head_branch == 'main' ||
+       (startsWith(github.event.workflow_run.head_branch, 'release/') &&
+        github.event.workflow_run.event == 'workflow_dispatch' &&
+        github.event.workflow_run.actor.login == 'github-actions[bot]'))
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -31,45 +38,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
-      - name: Prepare or publish the exact passing candidate
+      - name: Advance the exact validated candidate
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PECL_MAINTAINER: ${{ vars.PECL_MAINTAINER }}
-          PECL_NAME: ${{ vars.PECL_NAME }}
-          PECL_EMAIL: ${{ vars.PECL_EMAIL }}
           PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN" || { echo 'RELEASE_BOT_TOKEN is required for automatic candidates'; exit 1; }
-          source_sha=$(git rev-parse HEAD)
-          remote_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
-          test "$source_sha" = "$remote_sha" || { echo 'Main advanced; a newer quality run will release'; exit 0; }
-          node scripts/release-plan.mjs > /tmp/release-plan.json
-          version=$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/release-plan.json")).version || ""')
-          test -n "$version" || exit 0
-          current=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          if test "$current" != "$version"; then
-            git config user.name 'PHP Profiler Release Bot'
-            git config user.email 'php-profiler-release@users.noreply.github.com'
-            python3 scripts/prepare-release.py "$version"
-            git add Cargo.toml Cargo.lock CHANGELOG.md
-            git commit -m "chore(release): prepare $version"
-            branch="release/$version-${source_sha:0:12}"
-            existing=$(gh pr list --head "$branch" --state open --json number --jq 'length')
-            if test "$existing" != 0; then
-              gh pr merge "$branch" --auto --squash
-              exit 0
-            fi
-            git branch "$branch"
-            gh auth setup-git
-            git push origin "HEAD:refs/heads/$branch"
-            gh pr create --base main --head "$branch" --title "chore(release): prepare $version" --body 'Automatic alpha candidate. Required checks must validate this exact version tree, including source-bound native proofs. No proof hashes are automatically rewritten.'
-            gh pr merge "$branch" --auto --squash
-          else
-            test "$PUBLISHING_ENABLED" = true || { echo 'Publication blocked: registry ownership, publisher access and repository rules must be verified before enabling PUBLISHING_ENABLED'; exit 1; }
-            test -n "$PECL_MAINTAINER" && test -n "$PECL_NAME" && test -n "$PECL_EMAIL" || { echo 'Approved public PECL maintainer metadata is required'; exit 1; }
-            python3 scripts/package-source.py --maintainer "$PECL_MAINTAINER" --name "$PECL_NAME" --email "$PECL_EMAIL"
-            python3 scripts/finalize-release.py "$version" target/php-profiler-source.tgz
-          fi
+          QUALITY_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 scripts/release-automation.py "$QUALITY_RUN_ID"

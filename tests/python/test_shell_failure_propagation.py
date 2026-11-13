@@ -36,7 +36,7 @@ class ShellFailurePropagationTests(unittest.TestCase):
   printf '%s\\n' "$PROFILER_FAULT_RUNTIME"
   exit 73
 fi
-printf 'host: aarch64-apple-darwin\\n'
+printf 'host: aarch64-apple-darwin\\nLLVM version: 23.1.3\\n'
 ''')
         self.executable(tools / 'cc', '''touch "$PROFILER_FAULT_ROOT/compiler-called"
 case "${1:-}" in
@@ -44,7 +44,7 @@ case "${1:-}" in
   --print-runtime-dir) printf '%s\\n' "$PROFILER_FAULT_RUNTIME" ;;
   -print-target-triple) printf 'aarch64-unknown-linux-gnu\\n' ;;
   -print-file-name=*) printf '%s\\n' "$PROFILER_FAULT_RUNTIME/missing.so"; exit 73 ;;
-  *) printf 'test compiler\\n' ;;
+  *) printf 'clang version 23.1.3\\n' ;;
 esac
 ''')
         return tools, environment

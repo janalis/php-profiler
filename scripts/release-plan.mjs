@@ -6,9 +6,10 @@ export function nextRelease(previous, messages) {
   if (previous && !/^0\.\d+\.\d+-alpha\.[1-9]\d*$/.test(previous)) {
     throw new Error('Release channel needs explicit review');
   }
-  const breaking = messages.some(message =>
-    /^[a-z]+(?:\([^\n]+\))?!: .+/m.test(message) || /^BREAKING(?: CHANGE|-CHANGE): .+/m.test(message));
-  const release = breaking || messages.some(message => /^(?:feat|fix)(?:\([^\n]+\))?: .+/m.test(message));
+  const subjects = messages.map(message => message.trimStart().split(/\r?\n/, 1)[0]);
+  const breaking = subjects.some(subject => /^[a-z]+(?:\([^\n]+\))?!: .+/.test(subject)) ||
+    messages.some(message => /^BREAKING(?: CHANGE|-CHANGE): .+/m.test(message));
+  const release = breaking || subjects.some(subject => /^(?:feat|fix)(?:\([^\n]+\))?: .+/.test(subject));
   if (!release) return null;
   if (!previous) return '0.1.0-alpha.1';
   if (breaking) return `0.${semver.minor(previous) + 1}.0-alpha.1`;
