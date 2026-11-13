@@ -312,3 +312,42 @@ with tempfile.TemporaryDirectory() as directory:
 `;
   execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
 });
+
+test('registry verification refreshes each cache key and preserves bounded exact-source validation', () => {
+  const script = `
+import importlib.util, json
+from urllib.parse import urlsplit, parse_qs
+from unittest.mock import patch, call
+spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+version = '0.1.0-alpha.1'
+source = 'a' * 40
+missing = json.dumps({'package': {'name': 'janalis/php-profiler', 'versions': {}}}).encode()
+valid = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {'version': version, 'source': {'reference': source, 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
+with patch.object(module, 'fetch', side_effect=[missing, json.dumps(valid).encode()]) as fetch, patch.object(module.time, 'time_ns', side_effect=[100, 101]), patch.object(module.time, 'sleep') as sleep:
+    module.verify_published_package(version, source)
+    assert fetch.call_count == 2
+    urls = [item.args[0] for item in fetch.call_args_list]
+    assert len(set(urls)) == 2
+    for attempt, url in enumerate(urls):
+        parts = urlsplit(url)
+        assert (parts.scheme, parts.netloc, parts.path) == ('https', 'packagist.org', '/packages/janalis/php-profiler.json')
+        assert parse_qs(parts.query) == {'verification': [str(100 + attempt) + '-' + str(attempt)]}
+    sleep.assert_called_once_with(10)
+# Fresh data with a wrong source must fail; cache refresh never weakens identity.
+valid['package']['versions'][version]['source']['reference'] = 'b' * 40
+for response, expected_error in [(missing, 'not indexed'), (json.dumps(valid).encode(), 'does not match')]:
+    with patch.object(module, 'fetch', return_value=response) as fetch, patch.object(module.time, 'time_ns', return_value=100), patch.object(module.time, 'sleep') as sleep:
+        try:
+            module.verify_published_package(version, source)
+        except ValueError as error:
+            assert expected_error in str(error)
+        else:
+            raise AssertionError('invalid registry identity accepted')
+        assert fetch.call_count == 4
+        assert len({item.args[0] for item in fetch.call_args_list}) == 4
+        assert sleep.call_args_list == [call(10)] * 3
+`;
+  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
+});

@@ -108,6 +108,22 @@ def publish_tag(root, repo, source, tag, refs):
     subprocess.run(["git", "push", "origin", reference], cwd=root, check=True)
 
 
+def verify_published_package(version, source):
+    # The full package API can retain a pre-release CDN snapshot for twelve hours.
+    # A fresh query key reaches current registry data; every response still needs
+    # exact package/version/source verification. Missing indexing still fails.
+    for attempt in range(4):
+        try:
+            url = ("https://packagist.org/packages/janalis/php-profiler.json"
+                   f"?verification={time.time_ns()}-{attempt}")
+            verify_packagist(json.loads(fetch(url)), version, source)
+            break
+        except (ValueError, OSError):
+            if attempt == 3:
+                raise
+            time.sleep(10)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
@@ -156,16 +172,7 @@ def main():
         subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--prerelease",
                         "--title", tag, "--notes-file", str(root / "CHANGELOG.md"),
                         str(archive), str(checksum)], check=True)
-    # GitHub tag/release notifications drive Packagist indexing. A missing package or
-    # delayed webhook fails visibly after bounded retries, retaining immutable assets.
-    for attempt in range(4):
-        try:
-            verify_packagist(json.loads(fetch("https://packagist.org/packages/janalis/php-profiler.json")), args.version, source)
-            break
-        except (ValueError, OSError):
-            if attempt == 3:
-                raise
-            time.sleep(10)
+    verify_published_package(args.version, source)
     print(json.dumps({"version": args.version, "source": source, "sha256": hashlib.sha256(body).hexdigest(),
                       "packagist": "verified", "github": "published"}))
 
