@@ -1,12 +1,32 @@
 name: quality
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact source commit expected by release automation
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  source-pin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify dispatched source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          if [ -n "$EXPECTED_SHA" ]; then
+            test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          fi
   static-analysis:
+    needs: source-pin
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -31,7 +51,8 @@ jobs:
         run: python3 scripts/check-pr-title.py
       - run: shellcheck scripts/*.sh
   integration:
-    runs-on: ubuntu-latest
+    needs: source-pin
+    runs-on: ubuntu-24.04
     env:
       CI_PROFILER_REQUIRE_SAMPLING: '1'
     strategy:
@@ -50,6 +71,15 @@ jobs:
           extensions: pdo_sqlite, curl, pcntl
       - name: Verify requested PHP and SDK labels
         run: python3 scripts/php-environment-check.py --version '${{ matrix.php }}' --zts '${{ matrix.zts }}'
+      - name: Select a coherent Clang and libclang SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 libclang-19-dev
+          {
+            echo 'CC=/usr/bin/clang-19'
+            echo 'CLANG_PATH=/usr/bin/clang-19'
+            echo 'LIBCLANG_PATH=/usr/lib/llvm-19/lib'
+          } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
@@ -72,7 +102,8 @@ jobs:
           target/dev-venv/bin/pip install -r requirements-dev.txt
           PROFILER_EXTENSION="$PWD/target/debug/libphp_profiler.so" target/dev-venv/bin/python scripts/schema-tests.py
   coverage:
-    runs-on: ubuntu-latest
+    needs: source-pin
+    runs-on: ubuntu-24.04
     env:
       CI_PROFILER_REQUIRE_SAMPLING: '1'
     steps:
@@ -92,12 +123,20 @@ jobs:
       - name: Install matching LLVM 23 C instrumentation
         shell: bash
         run: |
-          curl --fail --show-error --location https://apt.llvm.org/llvm.sh -o /tmp/llvm-install.sh
-          sudo bash /tmp/llvm-install.sh 23
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg
+          curl --fail --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key -o /tmp/llvm-signing-key.asc
+          gpg --dearmor --output /tmp/llvm-signing-key.gpg /tmp/llvm-signing-key.asc
+          sudo install -m 0644 /tmp/llvm-signing-key.gpg /usr/share/keyrings/profiler-llvm.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/profiler-llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main' | sudo tee /etc/apt/sources.list.d/profiler-llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 libclang-23-dev
           clang-23 --version
       - run: scripts/native-coverage.sh
         env:
-          CC: clang-23
+          CC: /usr/bin/clang-23
+          CLANG_PATH: /usr/bin/clang-23
+          LIBCLANG_PATH: /usr/lib/llvm-23/lib
           PROFILER_COVERAGE_TOOLCHAIN: nightly-2026-11-11
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
@@ -105,11 +144,21 @@ jobs:
           name: coverage
           path: target/native-cov/**/*.json
   mutation:
-    runs-on: ubuntu-latest
+    needs: source-pin
+    runs-on: ubuntu-24.04
     env:
       CI_PROFILER_REQUIRE_SAMPLING: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Select a coherent Clang and libclang SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 libclang-19-dev
+          {
+            echo 'CC=/usr/bin/clang-19'
+            echo 'CLANG_PATH=/usr/bin/clang-19'
+            echo 'LIBCLANG_PATH=/usr/lib/llvm-19/lib'
+          } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
@@ -132,7 +181,8 @@ jobs:
           path: target/rust-mutation/**
 
   docker-sapis:
-    runs-on: ubuntu-latest
+    needs: source-pin
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -154,6 +204,13 @@ jobs:
             'local-php-profiler:${{ matrix.php }}-${{ matrix.sapi }}' \
             python3 scripts/performance-evidence.py --extension /profiler/target/release/libphp_profiler.so \
             --output /evidence --with-sampling --with-warm-disabled "${fpm_args[@]}"
+      - name: Make container receipts readable by the artifact uploader
+        if: always()
+        shell: bash
+        run: |
+          for directory in target/compatibility target/performance; do
+            if test -d "$directory"; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -166,6 +223,7 @@ jobs:
           path: target/performance
 
   address-sanitizer:
+    needs: source-pin
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -183,7 +241,7 @@ jobs:
         run: |
           brew install llvm
           "$(brew --prefix llvm)/bin/clang" --version | tee /tmp/profiler-clang-version
-          rg 'version 23\.' /tmp/profiler-clang-version
+          grep -E 'version 23\.' /tmp/profiler-clang-version
           {
             echo "CC=$(brew --prefix llvm)/bin/clang"
             echo "CLANG_PATH=$(brew --prefix llvm)/bin/clang"
@@ -194,6 +252,7 @@ jobs:
           PROFILER_SANITIZER_TOOLCHAIN: nightly-2026-11-11
 
   c-mutation:
+    needs: source-pin
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -230,6 +289,7 @@ jobs:
           path: target/c-mutants/results
 
   clang-c-coverage:
+    needs: source-pin
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -245,6 +305,13 @@ jobs:
         run: |
           mkdir -p target/clang-gcov-${{ matrix.sapi }}
           docker run --rm -v "$PWD/target/clang-gcov-${{ matrix.sapi }}:/evidence" -e CARGO_TARGET_DIR=/evidence local-php-profiler-clang-gcov:8.3-${{ matrix.sapi }}
+      - name: Make container receipts readable by the artifact uploader
+        if: always()
+        shell: bash
+        run: |
+          for directory in target/clang-gcov-${{ matrix.sapi }}; do
+            if test -d "$directory"; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -252,6 +319,7 @@ jobs:
           path: target/clang-gcov-${{ matrix.sapi }}/**
 
   zts-thread-isolation:
+    needs: source-pin
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -277,6 +345,7 @@ jobs:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
 
   vendored-ownership-mutation:
+    needs: source-pin
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -288,6 +357,15 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
+      - name: Select a coherent Clang and libclang SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 libclang-19-dev
+          {
+            echo 'CC=/usr/bin/clang-19'
+            echo 'CLANG_PATH=/usr/bin/clang-19'
+            echo 'LIBCLANG_PATH=/usr/lib/llvm-19/lib'
+          } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
@@ -299,6 +377,7 @@ jobs:
           path: target/vendor-patch-mutation
 
   zts-sampling-isolation:
+    needs: source-pin
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -309,6 +388,13 @@ jobs:
           mkdir -p target/zts-sampling-ci
           docker run --rm --network=none -v "$PWD/target/zts-sampling-ci:/receipts" \
             profiler-sampling-embed python3 scripts/zts-sampling-tests.py --output /receipts
+      - name: Make container receipts readable by the artifact uploader
+        if: always()
+        shell: bash
+        run: |
+          for directory in target/zts-sampling-ci; do
+            if test -d "$directory"; then sudo chown -R "$(id -u):$(id -g)" "$directory"; fi
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -316,6 +402,7 @@ jobs:
           path: target/zts-sampling-ci/**
 
   formatting:
+    needs: source-pin
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -327,6 +414,7 @@ jobs:
       - run: make fmt-check
 
   release-tooling:
+    needs: source-pin
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -339,9 +427,50 @@ jobs:
       - run: python3 -m unittest discover -s tests/python
       - run: make package-check
 
+  package-install:
+    needs: source-pin
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.3'
+            zts: nts
+          - php: '8.5'
+            zts: ts
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        env:
+          phpts: ${{ matrix.zts }}
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.99.1'
+      - name: Select a coherent Clang and libclang SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 libclang-19-dev
+          {
+            echo 'CC=/usr/bin/clang-19'
+            echo 'CLANG_PATH=/usr/bin/clang-19'
+            echo 'LIBCLANG_PATH=/usr/lib/llvm-19/lib'
+          } >> "$GITHUB_ENV"
+      - name: Download and verify PIE 1.5.5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p target/tools
+          curl --fail --show-error --location https://github.com/php/pie/releases/download/1.5.5/pie.phar -o target/tools/pie.phar
+          echo '2ca0dff6868f1b53c095625674deef38ac698588e0a25e4321cd834a5b7553bc  target/tools/pie.phar' | sha256sum --check
+          gh attestation verify --owner php target/tools/pie.phar
+      - run: make package-install-smoke
+
   quality-gate:
     if: always()
-    needs: [static-analysis, integration, coverage, mutation, docker-sapis, address-sanitizer, c-mutation, clang-c-coverage, zts-thread-isolation, vendored-ownership-mutation, zts-sampling-isolation, formatting, release-tooling]
+    needs: [source-pin, static-analysis, integration, coverage, mutation, docker-sapis, address-sanitizer, c-mutation, clang-c-coverage, zts-thread-isolation, vendored-ownership-mutation, zts-sampling-isolation, formatting, release-tooling, package-install]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every quality job

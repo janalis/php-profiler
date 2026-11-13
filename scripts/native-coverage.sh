@@ -24,6 +24,11 @@ finish_coverage_run() {
 }
 trap finish_coverage_run EXIT
 export CC="${CC:-clang}"
+coverage_toolchain="${PROFILER_COVERAGE_TOOLCHAIN:-nightly}"
+export PROFILER_COVERAGE_TOOLCHAIN="$coverage_toolchain"
+# Compiler-rt profile structures differ across LLVM majors. A mismatched C
+# runtime can crash in profile finalization even when ordinary execution passes.
+python3 scripts/coverage_toolchain.py "$CC" "$coverage_toolchain"
 # bindgen discovers a Clang executable independently of cc-rs. Its resource
 # headers must match the loaded libclang, especially for AArch64 NEON builtins.
 if [[ -z "${CLANG_PATH:-}" ]]; then
@@ -47,8 +52,6 @@ export PROFILER_C_COVERAGE=1
 export PROFILER_C_UNIT_BOUNDARIES=1
 export PROFILER_SAMPLING_UNIT=1
 export PROFILER_ADAPTER_CONTRACT_TEST=1
-coverage_toolchain="${PROFILER_COVERAGE_TOOLCHAIN:-nightly}"
-export PROFILER_COVERAGE_TOOLCHAIN="$coverage_toolchain"
 rustc +"$coverage_toolchain" -vV > "$run_directory/rustc.txt"
 "$CC" --version > "$run_directory/cc.txt"
 # Coverage counters themselves must not race the tested concurrent code.
