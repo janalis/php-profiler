@@ -23,12 +23,17 @@ args = parser.parse_args()
 if args.jobs > 1 and os.environ.get("CARGO_TARGET_DIR"):
     parser.error("Parallel native mutation workers require separate target directories; use --jobs 1 with an inherited CARGO_TARGET_DIR")
 os.chdir(root)
+# Standalone Rust test executables do not host Zend. Only the native test
+# driver's separate cdylib build enables private Zend-linked contracts.
+private_flags = ('PROFILER_ADAPTER_CONTRACT_TEST', 'PROFILER_C_UNIT_BOUNDARIES', 'PROFILER_SAMPLING_UNIT')
+environment = {key: value for key, value in os.environ.items() if key not in private_flags}
+environment['CARGO_INCREMENTAL'] = '0'
 parent = args.output.resolve()
 parent.mkdir(parents=True, exist_ok=True)
 run = Path(tempfile.mkdtemp(prefix='run-', dir=parent))
 before = snapshot(root)
 (run / 'source-before.json').write_text(json.dumps(before, indent=2) + '\n')
-metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--format-version', '1', '--no-deps']))
+metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--format-version', '1', '--no-deps'], env=environment))
 members = {package['name']: Path(package['manifest_path']).parent.resolve()
            for package in metadata['packages'] if package['id'] in metadata['workspace_members']}
 if set(args.package) - members.keys():
@@ -47,7 +52,6 @@ else:
 unfiltered_command = list(command)
 for source in sorted(expected):
     command += ['--file', str(source.relative_to(root))]
-environment = dict(os.environ, PROFILER_ADAPTER_CONTRACT_TEST='1', PROFILER_C_UNIT_BOUNDARIES='1', PROFILER_SAMPLING_UNIT='1', CARGO_INCREMENTAL='0')
 status = 1
 manifest = {'mode': 'discovery-only' if args.list_only else 'full-mutation',
             'scope': 'all runtime Rust sources' if not args.package else 'targeted workspace packages',
@@ -55,6 +59,9 @@ manifest = {'mode': 'discovery-only' if args.list_only else 'full-mutation',
             'runtime_sources': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(expected)},
             'all_workspace_runtime_sources': sorted(str(p.relative_to(root)) for p in all_sources),
             'test_infrastructure_is_executed_not_mutated': True,
+            'private_contract_environment': {'standalone_unit_build': {key: environment.get(key) for key in private_flags},
+                                             'native_cdylib_build': {key: '1' for key in private_flags},
+                                             'driver': 'crates/php-profiler/tests/native.rs'},
             'discovery_command': command + ['--list', '--json'],
             'raw_counts': None,
             'compiler_cache_policy': {'CARGO_INCREMENTAL': environment['CARGO_INCREMENTAL']},

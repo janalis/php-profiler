@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import sys
 
@@ -17,6 +18,22 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def verify_atfork_wrapper(symbols, assembly):
+    """Prove the AMD64 fourth argument comes from this DSO's local handle.
+
+    objdump may label an address using an unrelated alias such as __TMC_END__;
+    compare the effective address to nm instead of trusting its display name.
+    """
+    handle = re.search(r'^([0-9a-fA-F]+) d __dso_handle$', symbols, re.MULTILINE)
+    marker = '<__pthread_atfork>:'
+    if not handle or marker not in assembly:
+        raise RuntimeError('Cargo DSO local atfork wrapper/handle not found')
+    wrapper = assembly.split(marker, 1)[1].split('\n\n', 1)[0]
+    load = re.search(r'\bmov\s+[^\n]*\(%rip\),%rcx\s*#\s*([0-9a-fA-F]+)\b', wrapper)
+    if not load or int(load.group(1), 16) != int(handle.group(1), 16) or not re.search(r'\bjmp\s+[^\n]*<__register_atfork@plt>', wrapper):
+        raise RuntimeError('atfork wrapper does not pass its local DSO identity')
 
 
 def main(processes):
@@ -106,11 +123,7 @@ def main(processes):
         # The actual Cargo-linked DSO must use glibc's DSO-local atfork wrapper.
         symbols = run(['nm', '-a', str(extension)], log='symbols.log')
         assembly = run(['objdump', '-d', str(extension)], log='disassembly.log')
-        if '__pthread_atfork' not in symbols or '__dso_handle' not in symbols:
-            raise RuntimeError('Cargo DSO atfork wrapper/DSO identity not found')
-        wrapper = assembly.split('<__pthread_atfork>:', 1)[-1].split('\n\n', 1)[0]
-        if '__dso_handle' not in wrapper or '__register_atfork' not in wrapper:
-            raise RuntimeError('atfork wrapper does not pass its local DSO identity')
+        verify_atfork_wrapper(symbols, assembly)
         receipt.update({'php': metadata, 'sdk_version': sdk_version,
                         'php_source_sha256': os.environ.get('PHP_SHA256'),
                         'configure_options': run([config, '--configure-options']).strip(),

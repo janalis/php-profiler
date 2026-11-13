@@ -601,9 +601,9 @@ static ZEND_FUNCTION(profiler_test_sampling_backlog_service) {
 #endif
     RETURN_FALSE;
 }
-// clang-format off: preserve Zend argument declaration macro layout.
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_frames_info, 0, 1, IS_ARRAY, 0)
-ZEND_ARG_TYPE_INFO(0, mode, IS_STRING, 0)
+// clang-format off: preserve Zend declaration macro layout.
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_frames_info,0,1,IS_ARRAY,0)
+ZEND_ARG_TYPE_INFO(0,mode,IS_STRING,0)
 ZEND_END_ARG_INFO()
 // clang-format on
 
@@ -1767,76 +1767,48 @@ static ZEND_FUNCTION(profiler_test_sampling_engine_destroy) {
 #endif
 }
 
-// clang-format off: preserve Zend argument declaration macro layout.
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_void, 0, 0, IS_VOID, 0)
-ZEND_END_ARG_INFO()
+// clang-format off: preserve Zend declaration macro layout.
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_void,0,0,IS_VOID,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_fault_info,0,1,IS_VOID,0)
+ZEND_ARG_TYPE_INFO(0,name,IS_STRING,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_int,0,0,IS_LONG,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_array,0,0,IS_ARRAY,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_run_info,0,1,IS_ARRAY,0)
+ZEND_ARG_TYPE_INFO(0,mode,IS_STRING,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_generator_info,0,1,IS_ARRAY,0)
+ZEND_ARG_OBJ_INFO(0,generator,Generator,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_bool,0,0,_IS_BOOL,0) ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_engine_probe_info,0,1,_IS_BOOL,0)
+ZEND_ARG_TYPE_INFO(0,mode,IS_STRING,0) ZEND_END_ARG_INFO()
+static const zend_function_entry sampling_test_functions[]={
+    ZEND_FE(profiler_test_sampling_frame_contract,sampling_frames_info)
+    ZEND_FE(profiler_test_sampling_backlog_service,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_lifecycle_contract,sampling_engine_probe_info)
+    ZEND_FE(profiler_test_sampling_engine_unready_drain,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_engine_drain_mutex,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_engine_destroy,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_engine_probe,sampling_engine_probe_info)
+    ZEND_FE(profiler_test_sampling_fault,sampling_test_fault_info)
+    ZEND_FE(profiler_test_sampling_start,sampling_test_int)
+    ZEND_FE(profiler_test_sampling_stop,sampling_test_void)
+    ZEND_FE(profiler_test_sampling_status,sampling_test_array)
+    ZEND_FE(profiler_test_sampling_capacity,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_counter_limit,sampling_test_void)
+    ZEND_FE(profiler_test_sampling_dropped_limit,sampling_test_void)
+    ZEND_FE(profiler_test_sampling_run,sampling_test_run_info)
+    ZEND_FE(profiler_test_sampling_fork,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_service,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_request_restart,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_fault_consumed,sampling_test_int)
+    ZEND_FE(profiler_test_sampling_lock_contention,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_empty_drain,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_register_again,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_lifecycle,sampling_test_bool)
+    ZEND_FE(profiler_test_sampling_generator_marker,sampling_test_generator_info)
+    ZEND_FE(profiler_test_sampling_blank_generator,sampling_test_bool)
+    ZEND_FE_END
+};
 // clang-format on
-// clang-format off: preserve Zend argument declaration macro layout.
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_fault_info, 0, 1, IS_VOID, 0)
-ZEND_ARG_TYPE_INFO(0, name, IS_STRING, 0) ZEND_END_ARG_INFO()
-    // clang-format on
-    // clang-format off: preserve Zend argument declaration macro layout.
-    ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_int, 0, 0, IS_LONG, 0) ZEND_END_ARG_INFO()
-        ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_array, 0, 0, IS_ARRAY, 0)
-            ZEND_END_ARG_INFO()
-    // clang-format on
-    // clang-format off: preserve Zend argument declaration macro layout.
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_run_info, 0, 1, IS_ARRAY, 0)
-                ZEND_ARG_TYPE_INFO(0, mode, IS_STRING, 0) ZEND_END_ARG_INFO()
-    // clang-format on
-
-    // clang-format off: preserve Zend argument declaration macro layout.
-    ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_generator_info, 0, 1, IS_ARRAY, 0)
-        ZEND_ARG_OBJ_INFO(0, generator, Generator, 0) ZEND_END_ARG_INFO()
-    // clang-format on
-    // clang-format off: preserve Zend argument declaration macro layout.
-            ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_test_bool, 0, 0, _IS_BOOL, 0)
-                ZEND_END_ARG_INFO()
-    // clang-format on
-    // clang-format off: preserve Zend argument declaration macro layout.
-                    ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(sampling_engine_probe_info, 0, 1,
-                                                            _IS_BOOL, 0)
-                        ZEND_ARG_TYPE_INFO(0, mode, IS_STRING, 0) ZEND_END_ARG_INFO()
-// clang-format on static const
-    zend_function_entry sampling_test_functions[] = {
-        ZEND_FE(profiler_test_sampling_frame_contract, sampling_frames_info) ZEND_FE(
-            profiler_test_sampling_backlog_service,
-            sampling_test_bool) ZEND_FE(profiler_test_sampling_lifecycle_contract,
-                                        sampling_engine_probe_info)
-            ZEND_FE(profiler_test_sampling_engine_unready_drain, sampling_test_bool) ZEND_FE(
-                profiler_test_sampling_engine_drain_mutex,
-                sampling_test_bool) ZEND_FE(profiler_test_sampling_engine_destroy,
-                                            sampling_test_bool)
-                ZEND_FE(profiler_test_sampling_engine_probe, sampling_engine_probe_info) ZEND_FE(
-                    profiler_test_sampling_fault,
-                    sampling_test_fault_info) ZEND_FE(profiler_test_sampling_start,
-                                                      sampling_test_int)
-                    ZEND_FE(profiler_test_sampling_stop, sampling_test_void) ZEND_FE(
-                        profiler_test_sampling_status,
-                        sampling_test_array) ZEND_FE(profiler_test_sampling_capacity,
-                                                     sampling_test_bool)
-                        ZEND_FE(profiler_test_sampling_counter_limit, sampling_test_void) ZEND_FE(
-                            profiler_test_sampling_dropped_limit,
-                            sampling_test_void) ZEND_FE(profiler_test_sampling_run,
-                                                        sampling_test_run_info)
-                            ZEND_FE(profiler_test_sampling_fork, sampling_test_bool) ZEND_FE(
-                                profiler_test_sampling_service,
-                                sampling_test_bool) ZEND_FE(profiler_test_sampling_request_restart,
-                                                            sampling_test_bool)
-                                ZEND_FE(profiler_test_sampling_fault_consumed, sampling_test_int)
-                                    ZEND_FE(profiler_test_sampling_lock_contention,
-                                            sampling_test_bool)
-                                        ZEND_FE(profiler_test_sampling_empty_drain,
-                                                sampling_test_bool)
-                                            ZEND_FE(profiler_test_sampling_register_again,
-                                                    sampling_test_bool)
-                                                ZEND_FE(profiler_test_sampling_lifecycle,
-                                                        sampling_test_bool)
-                                                    ZEND_FE(profiler_test_sampling_generator_marker,
-                                                            sampling_test_generator_info)
-                                                        ZEND_FE(
-                                                            profiler_test_sampling_blank_generator,
-                                                            sampling_test_bool) ZEND_FE_END};
 #ifdef PROFILER_GUARD_UNIT_PRESENT
 extern void profiler_test_guard_unregister(void);
 #elif defined(__linux__)

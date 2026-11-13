@@ -23,3 +23,4 @@ node_modules/
 /packaging/modules/
 /packaging/run-tests.php
 /packaging/libtool
+/.playwright-mcp/

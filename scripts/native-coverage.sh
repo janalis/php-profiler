@@ -24,6 +24,11 @@ finish_coverage_run() {
 }
 trap finish_coverage_run EXIT
 export CC="${CC:-clang}"
+coverage_toolchain="${PROFILER_COVERAGE_TOOLCHAIN:-nightly}"
+export PROFILER_COVERAGE_TOOLCHAIN="$coverage_toolchain"
+# Compiler-rt profile structures differ across LLVM majors. A mismatched C
+# runtime can crash in profile finalization even when ordinary execution passes.
+python3 scripts/coverage_toolchain.py "$CC" "$coverage_toolchain"
 # bindgen discovers a Clang executable independently of cc-rs. Its resource
 # headers must match the loaded libclang, especially for AArch64 NEON builtins.
 if [[ -z "${CLANG_PATH:-}" ]]; then
@@ -47,8 +52,6 @@ export PROFILER_C_COVERAGE=1
 export PROFILER_C_UNIT_BOUNDARIES=1
 export PROFILER_SAMPLING_UNIT=1
 export PROFILER_ADAPTER_CONTRACT_TEST=1
-coverage_toolchain="${PROFILER_COVERAGE_TOOLCHAIN:-nightly}"
-export PROFILER_COVERAGE_TOOLCHAIN="$coverage_toolchain"
 rustc +"$coverage_toolchain" -vV > "$run_directory/rustc.txt"
 "$CC" --version > "$run_directory/cc.txt"
 # Coverage counters themselves must not race the tested concurrent code.
@@ -75,12 +78,15 @@ with open(sys.argv[1], 'w') as output:
     json.dump({name: os.environ.get(name) for name in names}, output, indent=2)
     output.write(chr(10))
 PYFLAGS
+export LLVM_PROFILE_FILE="$CARGO_LLVM_COV_TARGET_DIR/core-%p-%16m.profraw"
 cargo +"$coverage_toolchain" test -p profiler-core --message-format=json > "$run_directory/core-tests.jsonl"
 # The standalone Rust unit binary has no Zend host. Private C transports retain
 # Zend functions through their instrumentation hooks; execute those transports
 # in the genuine PHP-loaded DSO below, while retaining every pure unit test here.
+export LLVM_PROFILE_FILE="$CARGO_LLVM_COV_TARGET_DIR/adapter-%p-%16m.profraw"
 env -u PROFILER_C_UNIT_BOUNDARIES -u PROFILER_SAMPLING_UNIT \
   cargo +"$coverage_toolchain" test -p php-profiler --lib --message-format=json > "$run_directory/adapter-tests.jsonl"
+export LLVM_PROFILE_FILE="$CARGO_LLVM_COV_TARGET_DIR/native-%p-%16m.profraw"
 cargo +"$coverage_toolchain" build -p php-profiler --lib
 suffix=so
 if [[ "$OSTYPE" == darwin* ]]; then suffix=dylib; fi
@@ -119,8 +125,8 @@ with open(sys.argv[4], 'w') as output:
     subprocess.run([sys.argv[1], 'export', sys.argv[2], '-instr-profile=' + sys.argv[3],
                     *map(str, sorted(runtime_sources(Path.cwd(), 'c')))], check=True, stdout=output)
 PYCEXPORT
-# Put the executing native DSO first. Reversing this order makes llvm-cov
-# choose zero-count unit-test maps for identically named exported C callbacks.
+# Export each actual execution cohort against only its own recorded profiles.
+# Unmangled callbacks in standalone tests and PHP DSOs have different map hashes.
 python3 scripts/export-native-coverage.py "$llvm_bin/llvm-cov" "$run_directory" "$PROFILER_EXTENSION" "$profile_data"
 result=0
 python3 scripts/check-coverage.py "$run_directory/coverage-native-first.json" --workspace-root "$PWD" --language rust || result=1
