@@ -485,3 +485,19 @@ jobs:
           if failed:
               raise SystemExit('Unsuccessful quality jobs: ' + ', '.join(failed))
           PYCODE
+
+  release-continuation:
+    needs: quality-gate
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Explicitly continue from the verified quality run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          QUALITY_RUN_ID: ${{ github.run_id }}
+        run: gh workflow run release.yml --repo "$GH_REPO" --ref main -f "quality_run_id=$QUALITY_RUN_ID"

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tomllib
+import time
 
 REPOSITORY = "janalis/php-profiler"
 
@@ -22,6 +23,29 @@ def api(path):
 def dispatch(branch, source):
     subprocess.run(["gh", "workflow", "run", "ci.yml", "--repo", REPOSITORY,
                     "--ref", branch, "-f", "expected_sha=" + source], check=True)
+
+
+def completed_run(run_id, attempts=24, delay=5):
+    """Allow the dispatching quality job to finish, never accept partial success."""
+    for attempt in range(attempts):
+        run = api(f"actions/runs/{run_id}")
+        if run.get("status") == "completed":
+            if run.get("conclusion") != "success":
+                raise ValueError("Quality workflow completed without success")
+            return run
+        if run.get("status") not in {"queued", "in_progress", "waiting", "pending", "requested"}:
+            raise ValueError("Unexpected quality workflow status")
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+    raise TimeoutError("Quality workflow did not complete before the release continuation deadline")
+
+
+def publish_quality_status(source, run_id):
+    """Project verified full QA into the PR-compatible commit status API."""
+    subprocess.run(["gh", "api", "--method", "POST", f"repos/{REPOSITORY}/statuses/{source}",
+                    "-f", "state=success", "-f", "context=quality-gate",
+                    "-f", f"target_url=https://github.com/{REPOSITORY}/actions/runs/{run_id}",
+                    "-f", "description=Full exact-SHA quality workflow passed"], check=True)
 
 
 def validate_run(run, source):
@@ -60,7 +84,7 @@ def main():
     root = Path(__file__).resolve().parent.parent
     os.chdir(root)
     checkout = command("git", "rev-parse", "HEAD")
-    run = api(f"actions/runs/{args.quality_run_id}")
+    run = completed_run(args.quality_run_id)
     source = run.get("head_sha", "")
     branch = validate_run(run, source)
     main_sha = api("git/ref/heads/main")["object"]["sha"]
@@ -102,6 +126,7 @@ def main():
         if parent != main_sha:
             print("Main advanced; this candidate is obsolete")
             return
+        publish_quality_status(source, args.quality_run_id)
         subprocess.run(["gh", "pr", "merge", str(prs[0]["number"]), "--repo", REPOSITORY,
                         "--squash", "--match-head-commit", source], check=True)
         pr = json.loads(command("gh", "pr", "view", str(prs[0]["number"]), "--repo", REPOSITORY,

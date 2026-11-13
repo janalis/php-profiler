@@ -25,11 +25,13 @@ class Transport:
         self.fail_dispatch = True
         self.merges = 0
         self.dispatches = []
+        self.statuses = []
+        self.quality_receipts = []
         self.calls = []
         self.tree = 'd' * 40
         self.pr = {'number': 17, 'headRefOid': self.source, 'baseRefName': 'main',
                    'author': {'login': 'github-actions[bot]'}, 'state': 'OPEN', 'mergeCommit': None}
-        self.quality = {'name': 'quality', 'conclusion': 'success', 'head_sha': self.source,
+        self.quality = {'status': 'completed', 'name': 'quality', 'conclusion': 'success', 'head_sha': self.source,
                         'head_branch': self.branch, 'head_repository': {'full_name': MODULE.REPOSITORY},
                         'event': 'workflow_dispatch', 'actor': {'login': 'github-actions[bot]'}}
 
@@ -48,7 +50,7 @@ class Transport:
         if args[:2] == ['gh', 'api']:
             suffix = args[2].removeprefix('repos/' + MODULE.REPOSITORY + '/')
             if suffix == 'actions/runs/42':
-                return json.dumps(self.quality)
+                return json.dumps(self.quality_receipts.pop(0) if self.quality_receipts else self.quality)
             if suffix == 'git/ref/heads/main':
                 return json.dumps({'object': {'sha': self.main}})
             if suffix == 'git/ref/heads/' + self.branch:
@@ -65,6 +67,14 @@ class Transport:
     def run(self, args, **kwargs):
         self.calls.append(tuple(args))
         if args == ['git', 'fetch', 'origin', 'refs/pull/17/head']:
+            return subprocess.CompletedProcess(args, 0)
+        if args[:4] == ['gh', 'api', '--method', 'POST']:
+            assert args == ['gh', 'api', '--method', 'POST',
+                            'repos/' + MODULE.REPOSITORY + '/statuses/' + self.source,
+                            '-f', 'state=success', '-f', 'context=quality-gate',
+                            '-f', 'target_url=https://github.com/' + MODULE.REPOSITORY + '/actions/runs/42',
+                            '-f', 'description=Full exact-SHA quality workflow passed']
+            self.statuses.append(self.source)
             return subprocess.CompletedProcess(args, 0)
         if args[:3] == ['gh', 'pr', 'merge']:
             assert self.pr['state'] == 'OPEN'
@@ -111,7 +121,60 @@ class ReleaseRecoveryTests(unittest.TestCase):
         self.invoke(transport)
         self.assertEqual(transport.merges, 1)
         self.assertEqual(transport.dispatches, [transport.merged, transport.merged])
-        self.assertEqual(len(transport.calls), 20)
+        self.assertEqual(len(transport.calls), 21)
+        self.assertEqual(transport.statuses, [transport.source])
+
+    def test_actual_main_waits_for_overall_quality_completion_before_status_or_merge(self):
+        transport = Transport()
+        transport.fail_dispatch = False
+        transport.quality_receipts = [dict(transport.quality, status='in_progress', conclusion=None)]
+        with patch.object(MODULE.time, 'sleep') as sleep:
+            self.invoke(transport)
+        sleep.assert_called_once_with(5)
+        self.assertEqual(transport.statuses, [transport.source])
+        self.assertEqual(transport.merges, 1)
+        polls = [index for index, call in enumerate(transport.calls) if call == ('gh', 'api', 'repos/' + MODULE.REPOSITORY + '/actions/runs/42')]
+        status = next(index for index, call in enumerate(transport.calls) if call[:4] == ('gh', 'api', '--method', 'POST'))
+        self.assertEqual(len(polls), 2)
+        self.assertLess(polls[-1], status)
+
+    def test_actual_main_terminal_failure_cannot_project_success_or_merge(self):
+        transport = Transport()
+        transport.quality['conclusion'] = 'failure'
+        with self.assertRaisesRegex(ValueError, 'without success'):
+            self.invoke(transport)
+        self.assertEqual(transport.statuses, [])
+        self.assertEqual(transport.merges, 0)
+
+    def test_full_candidate_validation_precedes_status_projection_and_protected_merge(self):
+        transport = Transport()
+        transport.fail_dispatch = False
+        self.invoke(transport)
+        status_index = next(index for index, call in enumerate(transport.calls) if call[:4] == ('gh', 'api', '--method', 'POST'))
+        branch_index = next(index for index, call in enumerate(transport.calls) if call[-1] == 'repos/' + MODULE.REPOSITORY + '/git/ref/heads/' + transport.branch)
+        merge_index = next(index for index, call in enumerate(transport.calls) if call[:3] == ('gh', 'pr', 'merge'))
+        self.assertLess(branch_index, status_index)
+        self.assertLess(status_index, merge_index)
+        self.assertEqual(transport.statuses, [transport.source])
+
+    def test_failed_metadata_validation_cannot_publish_a_success_status(self):
+        transport = Transport()
+        with patch.object(sys, 'argv', ['release-automation', '42']), \
+                patch.object(MODULE.subprocess, 'check_output', side_effect=transport.output), \
+                patch.object(MODULE.subprocess, 'run', side_effect=transport.run), \
+                patch.object(MODULE, 'validate_candidate', side_effect=ValueError('invalid metadata')):
+            with self.assertRaisesRegex(ValueError, 'invalid metadata'):
+                MODULE.main()
+        self.assertEqual(transport.statuses, [])
+        self.assertEqual(transport.merges, 0)
+
+    def test_wrong_quality_source_cannot_publish_a_success_status(self):
+        transport = Transport()
+        transport.quality['head_sha'] = 'e' * 40
+        with self.assertRaisesRegex(ValueError, 'Expected one bot pull request'):
+            self.invoke(transport)
+        self.assertEqual(transport.statuses, [])
+        self.assertEqual(transport.merges, 0)
 
     def test_recovery_rejects_foreign_author_wrong_head_and_wrong_base(self):
         for field, value in [('author', {'login': 'someone-else'}), ('headRefOid', 'e' * 40),
@@ -152,6 +215,39 @@ class ReleaseRecoveryTests(unittest.TestCase):
                     self.invoke(transport)
                 self.assertEqual(transport.dispatches, [])
                 self.assertEqual(transport.merges, 0)
+
+
+class CompletionWaitTests(unittest.TestCase):
+    def test_in_progress_then_completed_success_has_bounded_polling(self):
+        receipt = {'status': 'completed', 'conclusion': 'success'}
+        with patch.object(MODULE, 'api', side_effect=[{'status': 'in_progress'}, receipt]) as api, \
+                patch.object(MODULE.time, 'sleep') as sleep:
+            self.assertIs(MODULE.completed_run(42), receipt)
+        self.assertEqual(api.call_args_list, [unittest.mock.call('actions/runs/42')] * 2)
+        sleep.assert_called_once_with(5)
+
+    def test_terminal_failure_cancelled_or_action_required_never_waits_or_succeeds(self):
+        for conclusion in ('failure', 'cancelled', 'action_required', 'timed_out', None):
+            with self.subTest(conclusion=conclusion), \
+                    patch.object(MODULE, 'api', return_value={'status': 'completed', 'conclusion': conclusion}) as api, \
+                    patch.object(MODULE.time, 'sleep') as sleep:
+                with self.assertRaisesRegex(ValueError, 'without success'):
+                    MODULE.completed_run(42)
+                api.assert_called_once_with('actions/runs/42')
+                sleep.assert_not_called()
+
+    def test_deadline_and_unknown_status_fail_without_success_projection(self):
+        with patch.object(MODULE, 'api', return_value={'status': 'in_progress'}) as api, \
+                patch.object(MODULE.time, 'sleep') as sleep:
+            with self.assertRaises(TimeoutError):
+                MODULE.completed_run(42, attempts=3, delay=2)
+            self.assertEqual(api.call_count, 3)
+            self.assertEqual(sleep.call_args_list, [unittest.mock.call(2)] * 2)
+        with patch.object(MODULE, 'api', return_value={'status': 'unexpected'}), \
+                patch.object(MODULE.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(ValueError, 'Unexpected'):
+                MODULE.completed_run(42)
+            sleep.assert_not_called()
 
 
 if __name__ == '__main__':
