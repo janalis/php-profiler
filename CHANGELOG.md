@@ -18,6 +18,8 @@ All notable changes are documented here using Semantic Versioning.
 
 ### Fixed
 
+- Resume main quality validation after a release candidate merge and dispatch failure.
+
 - Assert frame completion before teardown so a broken close operation fails promptly.
 
 - Preserve same-line closure identity regression coverage through PHP formatting.

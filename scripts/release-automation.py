@@ -68,18 +68,40 @@ def main():
         print("Trusted main checkout is stale; retry on current main")
         return
     if branch != "main":
-        if api("git/ref/heads/" + branch)["object"]["sha"] != source:
-            raise ValueError("Candidate branch advanced after quality validation")
+        # A previous attempt may have merged successfully before dispatch failed.
+        # Pull request records survive automatic source-branch deletion.
+        prs = json.loads(command("gh", "pr", "list", "--repo", REPOSITORY, "--head", branch,
+                                 "--base", "main", "--state", "all", "--json",
+                                 "number,headRefOid,author,baseRefName,state,mergeCommit"))
+        if (len(prs) != 1 or prs[0]["headRefOid"] != source or
+                prs[0].get("baseRefName") != "main" or
+                prs[0].get("author", {}).get("login") not in {"github-actions[bot]", "app/github-actions"}):
+            raise ValueError("Expected one bot pull request for this exact candidate and main base")
+        pr = prs[0]
+        if pr["state"] == "MERGED" and (pr.get("mergeCommit") or {}).get("oid") != main_sha:
+            raise ValueError("Merged candidate no longer identifies current main")
+        if pr["state"] not in {"OPEN", "MERGED"}:
+            raise ValueError("Candidate pull request is closed without a merge")
+        # Deleted branches may no longer be in checkout's fetched objects; GitHub
+        # retains the immutable PR head ref. Never execute candidate scripts.
+        subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr['number']}/head"], check=True)
         parent = command("git", "rev-parse", source + "^")
-        if parent != main_sha or not branch.endswith("-" + main_sha[:12]):
-            print("Main advanced; this candidate is obsolete")
-            return
+        if not branch.endswith("-" + parent[:12]):
+            raise ValueError("Candidate branch does not identify its immutable base")
         version = branch.removeprefix("release/").rsplit("-", 1)[0]
         validate_candidate(parent, source, version)
-        prs = json.loads(command("gh", "pr", "list", "--repo", REPOSITORY, "--head", branch,
-                                 "--base", "main", "--state", "open", "--json", "number,headRefOid,author"))
-        if len(prs) != 1 or prs[0]["headRefOid"] != source or prs[0].get("author", {}).get("login") not in {"github-actions[bot]", "app/github-actions"}:
-            raise ValueError("Expected one open pull request for this exact candidate")
+        if pr["state"] == "MERGED":
+            if (command("git", "rev-parse", main_sha + "^") != parent or
+                    command("git", "rev-parse", main_sha + "^{tree}") !=
+                    command("git", "rev-parse", source + "^{tree}")):
+                raise ValueError("Recorded merge differs from the validated squash candidate")
+            dispatch("main", main_sha)
+            return
+        if api("git/ref/heads/" + branch)["object"]["sha"] != source:
+            raise ValueError("Candidate branch advanced after quality validation")
+        if parent != main_sha:
+            print("Main advanced; this candidate is obsolete")
+            return
         subprocess.run(["gh", "pr", "merge", str(prs[0]["number"]), "--repo", REPOSITORY,
                         "--squash", "--match-head-commit", source], check=True)
         pr = json.loads(command("gh", "pr", "view", str(prs[0]["number"]), "--repo", REPOSITORY,
