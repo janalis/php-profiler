@@ -12,7 +12,7 @@ if [[ -n "${PROFILER_ASAN_RUNTIME:-}" ]]; then
   fi
 fi
 read -r -a extra_args <<< "${PHP_EXTRA_ARGS:-}"
-for module in pdo_sqlite curl pcntl; do
+for module in pdo pdo_sqlite curl pcntl; do
   if ! "${php_command[@]}" -n ${extra_args[@]+"${extra_args[@]}"} -r "exit(extension_loaded('$module') ? 0 : 1);"; then
     extra_args+=(-d "extension=$module")
   fi

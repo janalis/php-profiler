@@ -1,4 +1,4 @@
-"""Prepare version metadata; never touch source-qualified mutation proof ledgers."""
+"""Prepare release metadata and a narrowly proven version-only ledger transition."""
 import argparse
 import datetime
 import re
@@ -28,6 +28,14 @@ if source.count(heading) != 1 or f"## [{args.version}]" in source:
     parser.error("Changelog must contain a unique Unreleased section and no duplicate version")
 date = subprocess.check_output(["git", "show", "-s", "--format=%cs", "HEAD"], cwd=root, text=True).strip()
 datetime.date.fromisoformat(date)
-source = source.replace(heading, f"{heading}\n\n## [{args.version}] - {date}", 1)
+tags = subprocess.check_output(["git", "tag", "--merged", "HEAD", "--sort=-version:refname", "--list", "v*"], cwd=root, text=True).splitlines()
+revision = tags[0] + "..HEAD" if tags else "HEAD"
+subjects = subprocess.check_output(["git", "log", "--format=%s", revision], cwd=root, text=True).splitlines()
+notes = list(dict.fromkeys(subject for subject in subjects if re.match(r"(?:feat|fix)(?:\([^\n]+\))?!?: |[a-z]+(?:\([^\n]+\))?!: ", subject)))
+generated = "\n\n### Commits\n\n" + "\n".join("- " + subject for subject in notes) if notes else ""
+source = source.replace(heading, f"{heading}\n\n## [{args.version}] - {date}{generated}", 1)
 source = source.replace("No version has been published. ", "")
 changelog.write_text(source)
+
+# This refuses stale proofs; it is not a general source/formatting proof renewal.
+subprocess.run(["python3", "scripts/validate-version-transition.py", "HEAD", args.version, "--apply"], cwd=root, check=True)
