@@ -7,6 +7,7 @@ use ext_php_rs::types::{ZendHashTable, Zval};
 use profiler_core::{
     Budget, BudgetError, BudgetText, DEFAULT_BUDGET_BYTES, Engine, JsonBuffer, Report,
 };
+mod automatic;
 mod sampling;
 mod storage;
 use std::fmt::Write as _;
@@ -1231,11 +1232,14 @@ fn remove_fiber_context(pointer: u64, observation: Option<(u64, u64, u64)>) {
         }
     });
 }
-unsafe extern "C" fn startup(module_type: i32, _: i32) -> i32 {
+unsafe extern "C" fn startup(module_type: i32, module_number: i32) -> i32 {
     // The ext-php-rs generated startup wrapper invokes this callback before
     // registering classes. Zend observer registration is valid only at process
     // startup; dl() invokes a temporary module startup during active execution.
     if module_type != ext_php_rs::ffi::MODULE_PERSISTENT as i32 {
+        return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
+    }
+    if automatic::register(module_number) != 0 {
         return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
     }
     // SAFETY: permanent module startup is the required registration phase.
@@ -1260,9 +1264,19 @@ unsafe extern "C" fn request_startup(_: i32, _: i32) -> i32 {
     }
     sampling::reset_failure();
     STATE.with(|s| *s.borrow_mut() = State::default());
+    automatic::start();
     0
 }
 unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
+    // Freeze every recording session before serializing the automatic report:
+    // persistence work must not extend overlapping manual measurements.
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.enabled = false;
+        update_active(&s);
+        freeze_all(&mut s, "request_shutdown");
+    });
+    automatic::finish();
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         s.enabled = false;
@@ -1283,7 +1297,8 @@ unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
     unsafe { profiler_set_context_tracking(0) };
     0
 }
-unsafe extern "C" fn module_shutdown(_: i32, _: i32) -> i32 {
+unsafe extern "C" fn module_shutdown(_: i32, number: i32) -> i32 {
+    automatic::unregister(number);
     // SAFETY: unregister TSRM resources and join workers before this DSO unloads.
     unsafe { sampling::profiler_sampling_module_shutdown() };
     0

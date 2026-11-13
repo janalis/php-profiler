@@ -44,6 +44,7 @@ files = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
 pathlib.Path(sys.argv[2]).write_text(json.dumps(files, sort_keys=True, indent=2))
 PYHASH
 run_fpm_suite() {
+  docker run --rm "$image" python3 scripts/automatic-tests.py --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
   docker run --rm "$image" python3 scripts/fpm-test.py | tee "$compatibility/${version}-${sapi}-fpm.log"
   docker run --rm "$image" python3 scripts/sampling-jit-tests.py --fpm \
     --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts nts \

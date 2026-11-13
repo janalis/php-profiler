@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 use PhpProfiler\Profiler;
 
+if (!profiler_test_automatic_transports()) {
+    throw new RuntimeException('automatic C transport contract failed');
+}
 $session = Profiler::start();
 // A real evaluated op array has no function name and must be recorded as {main}.
 eval('usleep(1);');

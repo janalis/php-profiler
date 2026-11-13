@@ -124,10 +124,13 @@
         "__wrap_pthread_mutex_init",
         "__wrap_pthread_mutex_lock",
         "__wrap_pthread_mutex_unlock",
+        "__wrap_sapi_header_op",
         "__wrap_sched_yield",
         "__wrap_sysconf",
         "__wrap_zend_get_op_array_extension_handle",
-        "__wrap_zend_observer_fcall_register"
+        "__wrap_zend_is_auto_global_str",
+        "__wrap_zend_observer_fcall_register",
+        "__wrap_zend_register_ini_entries"
       ],
       "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
       "rustflags": "",
@@ -270,11 +273,14 @@
         "__wrap_pthread_mutex_init",
         "__wrap_pthread_mutex_lock",
         "__wrap_pthread_mutex_unlock",
+        "__wrap_sapi_header_op",
         "__wrap_sched_yield",
         "__wrap_sysconf",
         "__wrap_ts_allocate_id",
         "__wrap_zend_get_op_array_extension_handle",
-        "__wrap_zend_observer_fcall_register"
+        "__wrap_zend_is_auto_global_str",
+        "__wrap_zend_observer_fcall_register",
+        "__wrap_zend_register_ini_entries"
       ],
       "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
       "rustflags": "",
@@ -299,9 +305,10 @@
     "Cargo.lock": "2f7072da56aae345a14d24bfe0ad0ada5b529ba1edb8f46a248881949ba989ba",
     "Cargo.toml": "cab82bc9f79f6d50d4589c23d47a4802929a2f70f54a8938b44fb96ac840222b",
     "crates/php-profiler/Cargo.toml": "ce7e3aff7a61e041e96272375b5e1067015f5ef376a964bca6f2aedc48e56e70",
-    "crates/php-profiler/build.rs": "07823f20ed6872a0c228feb50524e72d0b33baf6ba4346e25edaa97890716c4a",
-    "crates/php-profiler/src/bridge.c": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
-    "crates/php-profiler/src/lib.rs": "71b20484f03ee6712ea73e2139f54b59847a8b6513f7c9806bfe3a1006838486",
+    "crates/php-profiler/build.rs": "b7532769eecefceac60e61a348bee6041342b0512d88da04073f3c534eb69235",
+    "crates/php-profiler/src/automatic.rs": "29d5d954c77657bee42ec5f4a86ce48811d9fdfeeddc21271593e64b359f630c",
+    "crates/php-profiler/src/bridge.c": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
+    "crates/php-profiler/src/lib.rs": "5883f21bb78d2bc53c91d135ec092c2ca5c81206042dd4848dff5f84cdce735a",
     "crates/php-profiler/src/sampling.c": "57cb579066658f5a1c523459a3bd30adb8850b29ae178dc31981dc82bb956fcc",
     "crates/php-profiler/src/sampling.rs": "48a46132c3138c7d127c2df01ade8398de56950ffc0834cb22df088be4d22fa0",
     "crates/php-profiler/src/storage.rs": "21ce23addb6bbcf90f581ca7ac5da4bda42cd505bebb396e747c50005da48df0",
@@ -312,20 +319,26 @@
     "crates/profiler-core/src/sampling.rs": "38f447e02e78151ded334c16804d12b85ddfa145fb5468e64a1adbe7b24e6a7b",
     "crates/profiler-core/src/serialization.rs": "cabe9fabdaf9ee2386d4222abe34c2387d8fae92a5e71ca65a3d2f2739336b8f",
     "crates/profiler-core/src/storage.rs": "6b404604930949fe9e0537670fef52e5ee8b69c76796c420aeb8e2e79526eee3",
-    "docs/mutation-equivalence.md": "5d0933d266d8252ab611d87069fc74f04fbe84acfc43fb6c45e1457c0b9474d1",
+    "docs/mutation-equivalence.md": "7bc3b195b26ad96d0c5b45045640f46e4a4f4dbb2001ee6fd765cb2bdc0acf7a",
+    "scripts/c-mutation-tests.sh": "d0b19535af6937980c78355ce973561ed18c5b305f1d8d3102601fe426f9f6fa",
     "scripts/link-native-faults.sh": "17402752cd23da83b64385dedaf31ef6146e62a5844de0127d6370c781aafecb",
+    "scripts/native-bailout-tests.py": "c3650b9bc2a774066459d7dec218282159e86e142e039794c943bc746dd5b233",
+    "tests/native/automatic-transports.c": "d28b3a61fbe6600a3c5e9ecb148a48cdfffc40d3ab11054f24741f936b324a10",
     "tests/native/bailout-fault.c": "cdd6287da2294ea6de2222d68a852579120290914689e39e8557294adb202e16",
-    "tests/native/bridge-unit.c": "76a5b8da33d8fb24e314b3db9fb0987669a810de70a75140f7d3e21e468ce9a6",
+    "tests/native/bridge-unit.c": "38b7887ea4abf6595f427d758b2193c55edbbf63519aba4f963d92f54d0ba690",
+    "tests/native/c-boundaries.php": "f6d339e7a6d240a368ba3f471ed9faa892b17c5d7ae6703f216084ef5ef70ef5",
     "tests/native/frames-native.c": "9bd4b5ee9163bc3bb3ce41e9e9487b02f9737bb35734975b5eff9c2c971e3aff",
     "tests/native/sampling-lifecycle-native.c": "83acaf91b44d5e549b6f17fcd8ab40289bee30acef0f5b36dfe662ec7312d40a",
     "tests/native/sampling-unit.c": "69edd0085f9899de64a5e8563446d532be2a712be8233cf35d0e048b594d514b",
-    "tests/support/adapter-contract.rs": "995463c6e138da62bba249e14e0eee0dc4b254b7819bdf3f225913246854dc2f",
+    "tests/support/adapter-contract.rs": "f6056fc3d16466b612f201511080866ccfe56ea0bfc80d74adb3c2e913e64614",
+    "tests/support/automatic-contract.c": "628d64d22b3ea116081f28dd2270a3202016874e744fbc2f166a1896a60d314f",
+    "tests/support/automatic-contract.rs": "64eefb5b0cf18fceba38ad273d82308f3800e6948e0fe7d8f4524a80962bd6f5",
     "tests/support/sampling-adapter-contract.rs": "5fa261763c3c28e1f3cadb5d0e2aefb8e8f25ded359024933fecd3bbba763a7e"
   },
   "equivalents": [
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -346,7 +359,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -367,7 +380,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -388,7 +401,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -409,7 +422,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -430,7 +443,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_init_const",
       "location": {
         "start": {
@@ -451,7 +464,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_init_const",
       "location": {
         "start": {
@@ -472,7 +485,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "42c3c4a77c07ee85a4bc7ee795aba1259869735983125c18fa53a3fdb3844d41",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
       "mutatorName": "cxx_remove_void_call",
       "location": {
         "start": {
@@ -789,6 +802,27 @@
         "php83-nts",
         "php83-zts"
       ]
+    },
+    {
+      "source": "crates/php-profiler/src/bridge.c",
+      "source_sha256": "6791ba4643ea8077d7ef24a0ed4a4b5a333035367ee2abf22b94b944e14689b3",
+      "mutatorName": "cxx_assign_const",
+      "location": {
+        "start": {
+          "line": 318,
+          "column": 17
+        },
+        "end": {
+          "line": 318,
+          "column": 18
+        }
+      },
+      "replacement": "= 42;",
+      "contexts": [
+        "php83-nts",
+        "php83-zts"
+      ],
+      "proof": "docs/mutation-equivalence.md#automatic-server-materialization-nonzero-success"
     }
   ]
 }

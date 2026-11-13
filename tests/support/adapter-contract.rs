@@ -121,6 +121,7 @@ pub fn register(module: ModuleBuilder) -> ModuleBuilder {
 #[php_function]
 pub fn profiler_adapter_contract_probe(mode: &str) -> bool {
     match mode {
+        "automatic" => automatic::contract::probe(),
         "disable-shared-boundary" => {
             let first = Profiler::start(None, false, 1).unwrap();
             let second = Profiler::start(None, false, 1).unwrap();

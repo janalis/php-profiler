@@ -45,3 +45,4 @@ PROFILER_EXTENSION="$extension" python3 scripts/metadata-tests.py
 "${php_command[@]}" -n -d "extension=$extension" tests/native/runtime-state.php
 
 "${php_command[@]}" -n -d "extension=$extension" tests/native/root-directory.php
+PROFILER_EXTENSION="$extension" python3 scripts/automatic-tests.py
