@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 use PhpProfiler\Profiler;
 
-// Identical source line/name, distinct opcode bodies and identities.
-$one = static function (int $delay): void {
-    usleep($delay);
-};
-$two = static function (int $delay): void {
-    usleep($delay + 1);
-};
+// Keep both definitions on one evaluated line so formatting cannot weaken this case.
+[$one, $two] =
+    eval('return [static function (int $delay): void { usleep($delay); }, static function (int $delay): void { usleep($delay + 1); }];');
+$oneReflection = new ReflectionFunction($one);
+$twoReflection = new ReflectionFunction($two);
+if (
+    $oneReflection->getStartLine() !== $twoReflection->getStartLine()
+    || $oneReflection->getFileName() !== $twoReflection->getFileName()
+) {
+    throw new RuntimeException('closure identity fixture must define both closures on the same source line');
+}
 $session = Profiler::start();
 $one(1);
 $two(1);

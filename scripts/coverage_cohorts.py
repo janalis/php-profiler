@@ -26,7 +26,7 @@ def logical_function(function):
     if not function['regions']:
         raise ValueError('Function has no source regions')
     first = function['regions'][0]
-    return (str(Path(function['filenames'][first[5]]).resolve()), *first[:4])
+    return (str(Path(function['filenames'][first[5]]).resolve()), *first[:2])
 
 
 def geometry(function):

@@ -77,6 +77,37 @@ def verify_checkout(root, version, body):
     verify_archive(body, version, committed)
 
 
+
+def publish_tag(root, repo, source, tag, refs):
+    """Use a real non-force lightweight tag push so the Packagist push hook fires."""
+    existing = [ref for ref in refs if ref["ref"] == "refs/tags/" + tag]
+    if existing and (existing[0]["object"]["sha"] != source or existing[0]["object"]["type"] != "commit"):
+        raise ValueError("Existing tag belongs to another source; never overwrite it")
+    reference = "refs/tags/" + tag
+    local = subprocess.run(["git", "show-ref", "--verify", "--quiet", reference], cwd=root)
+    if local.returncode == 0:
+        identity = subprocess.check_output(["git", "rev-parse", reference], cwd=root, text=True).strip()
+        kind = subprocess.check_output(["git", "cat-file", "-t", reference], cwd=root, text=True).strip()
+        if identity != source or kind != "commit":
+            raise ValueError("Existing local tag differs from the candidate lightweight tag")
+    elif local.returncode == 1:
+        subprocess.run(["git", "-c", "tag.gpgSign=false", "tag", tag, source], cwd=root, check=True)
+    else:
+        raise ValueError("Could not inspect the local tag")
+    if existing:
+        return
+    origin = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=root, text=True).strip()
+    if origin not in {f"https://github.com/{repo}", f"https://github.com/{repo}.git", f"git@github.com:{repo}.git"}:
+        raise ValueError("Origin does not identify the expected public repository")
+    # Credentials come from the ephemeral runner token; no token is embedded in
+    # the remote URL or command line. Recheck main immediately before the push.
+    subprocess.run(["gh", "auth", "setup-git"], cwd=root, check=True)
+    latest = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/git/ref/heads/main"], text=True))
+    if latest["object"]["sha"] != source:
+        raise ValueError("Main advanced before tag push; never publish a stale candidate")
+    subprocess.run(["git", "push", "origin", reference], cwd=root, check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
@@ -104,16 +135,7 @@ def main():
     refs = json.loads(subprocess.check_output([
         "gh", "api", f"repos/{repo}/git/matching-refs/tags/{tag}"
     ], text=True))
-    existing = [ref for ref in refs if ref["ref"] == "refs/tags/" + tag]
-    if existing:
-        if existing[0]["object"]["sha"] != source or existing[0]["object"]["type"] != "commit":
-            raise ValueError("Existing tag belongs to another source; never overwrite it")
-    else:
-        latest = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/git/ref/heads/main"], text=True))
-        if latest["object"]["sha"] != source:
-            raise ValueError("Main advanced before tag creation; never publish a stale candidate")
-        subprocess.run(["gh", "api", "--method", "POST", f"repos/{repo}/git/refs",
-                        "-f", "ref=refs/tags/" + tag, "-f", "sha=" + source], check=True)
+    publish_tag(root, repo, source, tag, refs)
     archive = args.archive.resolve()
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     checksum.write_text(hashlib.sha256(body).hexdigest() + "  " + archive.name + "\n")

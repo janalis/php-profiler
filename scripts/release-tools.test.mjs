@@ -125,6 +125,8 @@ packagist = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {
 def output(args, **kwargs):
     if args[:2] == ['git', 'rev-parse']:
         return source
+    if args[:2] == ['git', 'cat-file']:
+        return 'commit'
     if '/actions/runs/' in args[-1]:
         return json.dumps({'name': 'quality', 'conclusion': 'success', 'head_sha': source, 'head_branch': 'main', 'head_repository': {'full_name': 'janalis/php-profiler'}, 'event': 'workflow_dispatch'})
     if args[-1].endswith('/git/ref/heads/main'):
@@ -140,8 +142,9 @@ with tempfile.TemporaryDirectory() as directory:
     archive = Path(directory) / 'source.tgz'
     archive.write_bytes(b'archive')
     with patch.object(sys, 'argv', ['finalize', version, str(archive), '--quality-run-id', '42']), patch.object(module.subprocess, 'check_output', side_effect=output), patch.object(module.subprocess, 'run') as run, patch.object(module, 'fetch', side_effect=fetch), patch.object(module, 'verify_checkout'):
+        run.return_value.returncode = 0
         module.main()
-        assert run.call_count == 1
+        assert run.call_count == 2
         assert run.call_args.args[0][:3] == ['gh', 'release', 'upload']
         assert '--clobber' not in run.call_args.args[0]
         refs[0]['object']['sha'] = 'b' * 40
@@ -230,6 +233,82 @@ else:
 with patch.object(module.subprocess, 'run') as dispatch:
     module.dispatch('main', source)
     assert dispatch.call_args.args[0] == ['gh', 'workflow', 'run', 'ci.yml', '--repo', module.REPOSITORY, '--ref', 'main', '-f', 'expected_sha=' + source]
+`;
+  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
+});
+
+test('lightweight tag publication uses a real non-force push, safely resumes and rejects changed tags', () => {
+  const script = `
+import importlib.util, json, subprocess, tempfile
+from pathlib import Path
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+original_output = subprocess.check_output
+original_run = subprocess.run
+repo = 'janalis/php-profiler'
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory) / 'source'
+    root.mkdir()
+    remote = Path(directory) / 'remote.git'
+    def git(*args):
+        return original_output(['git', *args], cwd=root, stderr=subprocess.PIPE, text=True).strip()
+    git('init', '-b', 'main')
+    git('config', 'user.name', 'Release Test')
+    git('config', 'user.email', 'release@example.invalid')
+    git('commit', '--allow-empty', '-m', 'feat: initial')
+    source = git('rev-parse', 'HEAD')
+    original_run(['git', 'init', '--bare', str(remote)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    git('remote', 'add', 'origin', str(remote))
+    commands = []
+    current = source
+    def output(args, **kwargs):
+        if args[:3] == ['git', 'remote', 'get-url']:
+            return 'https://github.com/' + repo + '.git'
+        if args[:2] == ['gh', 'api']:
+            return json.dumps({'object': {'sha': current}})
+        return original_output(args, **kwargs)
+    def run(args, **kwargs):
+        commands.append(args)
+        if args == ['gh', 'auth', 'setup-git']:
+            return subprocess.CompletedProcess(args, 0)
+        kwargs.setdefault('stdout', subprocess.PIPE)
+        kwargs.setdefault('stderr', subprocess.PIPE)
+        return original_run(args, **kwargs)
+    tag = 'v0.1.0-alpha.1'
+    reference = 'refs/tags/' + tag
+    refs = [{'ref': reference, 'object': {'sha': source, 'type': 'commit'}}]
+    with patch.object(module.subprocess, 'check_output', side_effect=output), patch.object(module.subprocess, 'run', side_effect=run):
+        module.publish_tag(root, repo, source, tag, [])
+        assert ['git', 'push', 'origin', reference] in commands
+        assert all('--force' not in command and '-f' not in command for command in commands)
+        assert original_output(['git', '--git-dir=' + str(remote), 'rev-parse', reference], text=True).strip() == source
+        commands.clear()
+        module.publish_tag(root, repo, source, tag, refs)
+        assert not any(command[:2] == ['git', 'push'] for command in commands)
+        assert not any(command[:2] == ['gh', 'auth'] for command in commands)
+        git('commit', '--allow-empty', '-m', 'fix: another commit')
+        other = git('rev-parse', 'HEAD')
+        git('tag', '-f', tag, other)
+        commands.clear()
+        try:
+            module.publish_tag(root, repo, source, tag, refs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('wrong local tag accepted')
+        assert not any(command[:2] == ['git', 'push'] for command in commands)
+        current = other
+        commands.clear()
+        try:
+            module.publish_tag(root, repo, source, 'v0.1.0-alpha.2', [])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('main race accepted')
+        assert not any(command[:2] == ['git', 'push'] for command in commands)
+        assert original_output(['git', '--git-dir=' + str(remote), 'rev-parse', reference], text=True).strip() == source
 `;
   execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
 });

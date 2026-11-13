@@ -48,6 +48,12 @@ class CoverageCohortTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Incompatible coverage boundaries'):
             module.merge_reports([report(), changed], {SOURCE})
 
+    def test_changed_function_endpoint_cannot_create_a_new_identity(self):
+        changed = report()
+        changed['data'][0]['functions'][0]['regions'][0][3] = 10
+        with self.assertRaisesRegex(ValueError, 'Incompatible coverage boundaries'):
+            module.merge_reports([report(), changed], {SOURCE})
+
     def test_input_summary_is_verified_not_trusted(self):
         changed = report()
         changed['data'][0]['files'][0]['summary']['branches']['covered'] = 2

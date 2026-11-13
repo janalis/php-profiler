@@ -16,4 +16,12 @@ All notable changes are documented here using Semantic Versioning.
 - Register the native extension as `php_profiler`.
 - Preserve evidence and installed development tools during build cleanup.
 
+### Fixed
+
+- Preserve same-line closure identity regression coverage through PHP formatting.
+- Isolate coverage profiles by executable and preserve strict LLVM diagnostics.
+- Keep private Zend helpers out of standalone Rust mutation test builds.
+- Renew the audited native mutation coordinates after formatting, preserving raw outcomes.
+- Update pinned GitHub Actions and release version tooling.
+
 No version has been published. See the README and compatibility documentation for measurement and platform limitations.
