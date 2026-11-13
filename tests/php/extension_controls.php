@@ -36,6 +36,16 @@ function controls_leaf(): void
     usleep(1);
 }
 
+$manifest = file_get_contents(__DIR__ . '/../../Cargo.toml');
+controls_check($manifest !== false, 'workspace manifest missing');
+controls_check(
+    preg_match('/^\[workspace\.package\]\s*$(.*?)(?=^\[|\z)/ms', $manifest, $package) === 1,
+    'workspace package missing',
+);
+controls_check(preg_match('/^version\s*=\s*"([^"]+)"\s*$/m', $package[1], $version) === 1, 'workspace version missing');
+$expectedVersion = $version[1];
+controls_check(phpversion('php_profiler') === $expectedVersion, 'extension version differs from workspace');
+
 Profiler::disable();
 controls_check(!Profiler::isEnabled(), 'disabled state missing');
 Profiler::enable();
@@ -68,7 +78,10 @@ try {
     );
     controls_check($innerReport['runtime_metadata']['php_version'] === PHP_VERSION, 'PHP version missing');
     controls_check($innerReport['runtime_metadata']['sapi'] === PHP_SAPI, 'SAPI missing');
-    controls_check($innerReport['runtime_metadata']['profiler_version'] === '0.1.0', 'extension version missing');
+    controls_check(
+        $innerReport['runtime_metadata']['profiler_version'] === $expectedVersion,
+        'report version differs from workspace',
+    );
     controls_check($innerReport['runtime_metadata']['zts'] === (PHP_ZTS ? 'true' : 'false'), 'ZTS metadata differs');
     controls_check($outer->getReportPath() !== $inner->getReportPath(), 'directory report filenames collide');
     controls_check(
