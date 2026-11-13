@@ -47,6 +47,13 @@ with tempfile.TemporaryDirectory() as directory:
     report = json.loads(files[0].read_text())
     assert report['termination_reason'] == 'request_complete'
     files[0].unlink()
+    ignored = run_php(['php', '-n', '-d', 'extension=' + extension,
+                      '-d', 'php_profiler.mode=trigger', '-d', 'php_profiler.trigger_secret=test-secret',
+                      '-d', 'php_profiler.output_dir=' + directory, '-r', 'echo "ok";'],
+                     env=dict(php_environment, HTTP_X_PHP_PROFILER_TRIGGER='test-secret'),
+                     capture_output=True, check=True)
+    assert ignored.stdout == b'ok' and not ignored.stderr
+    assert not list(output.glob('*.json')), 'CLI environment must not activate HTTP trigger mode'
     fixture = output / 'request.php'
     fixture.write_text('<?php function leaf() {} leaf(); echo "ok";')
     settings = {'php_profiler.mode': 'trigger', 'php_profiler.trigger_secret': 'test-secret',

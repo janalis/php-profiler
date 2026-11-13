@@ -410,12 +410,18 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     module->type = previous_type;
     char *original_name = sapi_module.name;
     char *(*original_getenv)(const char *, size_t) = sapi_module.getenv;
-    profiler_thread_flags original_flags = profiler_flags;
     sapi_module.name = "cli";
+    sapi_module.getenv = automatic_test_getenv;
+    automatic_test_value = "secret";
+    automatic_fault = 3;
     AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 1);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    automatic_fault = 0;
     sapi_module.name = "contract-http";
     sapi_module.getenv = automatic_test_getenv;
+    automatic_test_value = "secret";
+    automatic_test_value = "";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"", 0) == 0);
     automatic_test_value = "secret";
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 0) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 4097) == 0);
@@ -426,6 +432,11 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     maximum[4096] = 0;
     automatic_test_value = maximum;
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)maximum, 4096) == 1);
+    char oversized[4098];
+    memset(oversized, 'x', 4097);
+    oversized[4097] = 0;
+    automatic_test_value = oversized;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)oversized, 4097) == 0);
     size_t page = (size_t)sysconf(_SC_PAGESIZE);
     unsigned char *guarded =
         mmap(NULL, page * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -450,9 +461,6 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
     add_assoc_long(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", 42);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
-    char oversized[4098];
-    memset(oversized, 'x', 4097);
-    oversized[4097] = 0;
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER",
                      oversized);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
@@ -460,18 +468,6 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)maximum, 4096) == 1);
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
-    automatic_fault = 4;
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
-    AUTOMATIC_ASSERT(profiler_flags.pending_bailout);
-    profiler_flags = original_flags;
-    automatic_fault = 1;
-    profiler_auto_log();
-    AUTOMATIC_ASSERT(profiler_flags.pending_bailout);
-    profiler_flags = original_flags;
-    automatic_fault = 2;
-    AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 0);
-    AUTOMATIC_ASSERT(profiler_flags.pending_bailout);
-    profiler_flags = original_flags;
     automatic_fault = 3;
     AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 0);
     automatic_fault = 0;
@@ -481,20 +477,59 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     sapi_module.getenv = original_getenv;
     RETURN_TRUE;
 }
+/* A dependency bailout abandons EG(current_execute_data). Check only native
+ * status/flags afterwards, then exit this isolated process without resuming
+ * Zend. C exit handlers flush both LLVM and gcov counters. */
+static PHP_FUNCTION(profiler_test_automatic_bailout) {
+    (void)execute_data;
+    const char *mode = getenv("PROFILER_TEST_AUTOMATIC_BAILOUT");
+    bool correct = false;
+    sapi_module.name = "contract-http";
+    sapi_module.getenv = NULL;
+    profiler_flags.pending_bailout = false;
+    if (mode && strcmp(mode, "materialize") == 0) {
+        automatic_fault = 4;
+        int status = profiler_materialize_server();
+        correct = status == 0 && profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "trigger") == 0) {
+        zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+        zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
+        if (Z_TYPE_P(server) != IS_ARRAY)
+            array_init(server);
+        add_assoc_string(server, "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
+        automatic_fault = 4;
+        int status = profiler_trigger_matches((const unsigned char *)"secret", 6);
+        correct = status == 0 && profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "log") == 0) {
+        automatic_fault = 1;
+        profiler_auto_log();
+        correct = profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "header") == 0) {
+        automatic_fault = 2;
+        int status = profiler_auto_header("X-Php-Profiler-Id: contract");
+        correct = status == 0 && profiler_flags.pending_bailout;
+    }
+    if (correct)
+        (void)write(1, "AUTOMATIC_C_GUARD_OK\n", sizeof("AUTOMATIC_C_GUARD_OK\n") - 1);
+    else
+        (void)write(2, "AUTOMATIC_C_GUARD_FAILED\n", sizeof("AUTOMATIC_C_GUARD_FAILED\n") - 1);
+    exit(correct ? 0 : 42);
+}
 static const zend_function_entry guard_functions[] = {
-    ZEND_FE(profiler_test_automatic_transports,
-            arginfo_uid_bool) ZEND_FE(profiler_test_guard_contract, arginfo_guard_contract)
-        ZEND_FE(profiler_test_uid_allocator, arginfo_uid_bool) ZEND_FE(profiler_test_uid_threads,
-                                                                       arginfo_uid_bool)
-            ZEND_FE(profiler_test_uid_cache, arginfo_uid_closure) ZEND_FE(profiler_test_named_cache,
-                                                                          arginfo_named_cache)
-                ZEND_FE(profiler_test_closure_storage, arginfo_closure_storage)
-                    ZEND_FE(profiler_test_exhaust_closure_ids, arginfo_guard_contract)
-                        ZEND_FE(profiler_test_uid_clock_failed, arginfo_uid_bool)
-                            ZEND_FE(profiler_test_fiber_callbacks, arginfo_fiber_callbacks)
-                                ZEND_FE(profiler_test_fiber_observation_arm, arginfo_uid_bool)
-                                    ZEND_FE(profiler_test_fiber_observation_valid, arginfo_uid_bool)
-                                        ZEND_FE_END};
+    ZEND_FE(profiler_test_automatic_bailout,
+            arginfo_guard_contract) ZEND_FE(profiler_test_automatic_transports, arginfo_uid_bool)
+        ZEND_FE(profiler_test_guard_contract,
+                arginfo_guard_contract) ZEND_FE(profiler_test_uid_allocator, arginfo_uid_bool)
+            ZEND_FE(profiler_test_uid_threads, arginfo_uid_bool) ZEND_FE(profiler_test_uid_cache,
+                                                                         arginfo_uid_closure)
+                ZEND_FE(profiler_test_named_cache, arginfo_named_cache)
+                    ZEND_FE(profiler_test_closure_storage, arginfo_closure_storage)
+                        ZEND_FE(profiler_test_exhaust_closure_ids, arginfo_guard_contract)
+                            ZEND_FE(profiler_test_uid_clock_failed, arginfo_uid_bool)
+                                ZEND_FE(profiler_test_fiber_callbacks, arginfo_fiber_callbacks)
+                                    ZEND_FE(profiler_test_fiber_observation_arm, arginfo_uid_bool)
+                                        ZEND_FE(profiler_test_fiber_observation_valid,
+                                                arginfo_uid_bool) ZEND_FE_END};
 /* Only the current MINIT's own entries may be removed. No retained static
  * flag can accidentally identify registrations from a later engine cycle. */
 #ifdef __linux__

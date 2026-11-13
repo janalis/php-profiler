@@ -93,9 +93,8 @@ The bridge sites have separate proofs:
   emitted stores and supported logical consumers use the same bit-0 normalization.
   The NTS context was reviewed independently after the corrected full run.
 
-No supported consumer compares the raw flag object or binds its byte layout in
-Rust. The private automatic transport guard saves/restores the structure without
-inspecting its raw representation; see the HTTP-control renewal below. Actual original and mutant ELF disassemblies,
+No supported consumer copies or compares the raw flag object, exposes its address,
+or binds its byte layout in Rust. Actual original and mutant ELF disassemblies,
 source-reader enumeration, private guard readers and dynamic-symbol checks are
 retained with hashes. These scoped proofs do not classify neighboring sites or
 true-to-42 mutations, and do not reclassify any raw killed outcome.
@@ -363,13 +362,12 @@ source, allocator, clocks, flag publications and resolver are unchanged.
 The new Rust lifecycle code starts captures through existing admission routines,
 freezes sessions before persistence, and consumes bridge flags through the existing
 typed FFI getters. It does not expose or inspect their byte representation.
-The private automatic transport test saves/restores the native flag structure;
-its Boolean assertions use typed field reads, not raw-byte comparisons. Reviewed
-Clang 19 NTS and ZTS disassemblies retain bit-0 normalization at these readers.
-This qualifies the previous statement about raw-object consumers: preserving a
-structure for restoration is now present, but observing/comparing its raw Boolean
-representation remains absent. The original noncanonical-byte proofs still apply
-only to the pinned actual compiler/consumer closure.
+The private automatic fault probes inspect only typed pending-bailout flags and
+C return statuses. Each fault runs in an isolated process which exits through C
+without resuming the abandoned Zend execution frame; exit handlers persist real
+coverage counters. Reviewed Clang 19 NTS and ZTS disassemblies retain bit-0
+normalization at the new flag readers. The original noncanonical-byte proofs
+still apply only to the pinned compiler/consumer closure.
 
 Three new Linux link wrappers intercept INI registration, auto-global
 materialization and SAPI header submission. They inject failures only in private
@@ -392,9 +390,9 @@ The exact `cxx_assign_const` mutation at `bridge.c` 318:17–18 replaces the
 successful local integer assignment `1` with `42`. It retains the original
 `zend_is_auto_global_str` call, its side effects, the initial zero, the bailout
 catch/deferred-failure publication, and restoration of Zend's bailout pointer.
-The local address does not escape. The static helper has one supported caller,
+The local address does not escape. The static helper has one production caller,
 which tests only logical zero/nonzero before inspecting the materialized server
-array. Neither the raw success integer nor its representation reaches PHP/Rust
+array. The isolated private failure probes require zero only on the bailout path. Neither the raw success integer nor its representation reaches PHP/Rust
 or a report. Thus 1 and 42 permit the same lookup; failures still return zero.
 This proof covers only this successful assignment, not the initializer, API call,
 header result or token comparison.
