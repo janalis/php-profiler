@@ -307,7 +307,7 @@
     "crates/php-profiler/Cargo.toml": "ce7e3aff7a61e041e96272375b5e1067015f5ef376a964bca6f2aedc48e56e70",
     "crates/php-profiler/build.rs": "b7532769eecefceac60e61a348bee6041342b0512d88da04073f3c534eb69235",
     "crates/php-profiler/src/automatic.rs": "fd7b13c751ffdfce1364f7d9aa8b5beff0932b6157ff5fcdb4fcc8da2e29a422",
-    "crates/php-profiler/src/bridge.c": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+    "crates/php-profiler/src/bridge.c": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
     "crates/php-profiler/src/lib.rs": "5883f21bb78d2bc53c91d135ec092c2ca5c81206042dd4848dff5f84cdce735a",
     "crates/php-profiler/src/sampling.c": "57cb579066658f5a1c523459a3bd30adb8850b29ae178dc31981dc82bb956fcc",
     "crates/php-profiler/src/sampling.rs": "48a46132c3138c7d127c2df01ade8398de56950ffc0834cb22df088be4d22fa0",
@@ -338,7 +338,7 @@
   "equivalents": [
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -359,7 +359,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -380,7 +380,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -401,7 +401,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -422,7 +422,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -443,7 +443,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_init_const",
       "location": {
         "start": {
@@ -464,7 +464,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_init_const",
       "location": {
         "start": {
@@ -485,7 +485,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_remove_void_call",
       "location": {
         "start": {
@@ -805,7 +805,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "b54d06cd317a5db03e26d88cd4d9f158550449256a474a22e45873de46166887",
+      "source_sha256": "6008ae3639d7633c7661e362b7476703f14e2bc47745eb693809129f3fa826c9",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {

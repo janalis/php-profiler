@@ -372,8 +372,9 @@ int profiler_auto_header(const char *value) {
     return success;
 }
 /* phpinfo() must never print the trigger secret. System-only entries have no
- * separate local value, so both columns describe the same configured value. */
+ * separate local value, so both columns describe the same configured value. The
+ * registered "" default and every INI update store a string, never NULL. */
 static ZEND_INI_DISP(profiler_secret_display) {
     (void)type;
-    php_printf("%s", ini_entry->value && ZSTR_LEN(ini_entry->value) ? "********" : "no value");
+    php_printf("%s", ZSTR_LEN(ini_entry->value) ? "********" : "no value");
 }
