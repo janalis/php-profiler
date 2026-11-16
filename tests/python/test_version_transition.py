@@ -143,7 +143,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             self.assertEqual((root / MODULE.LEDGER).read_bytes(), expected)
             receipt = json.loads((root / 'target/version-transition.json').read_text())
             self.assertEqual(receipt['dependency_updates'], updates)
-            self.assertEqual(receipt['unchanged_dependency_count'], 23)
+            self.assertEqual(receipt['unchanged_dependency_count'], len(MODULE.DEPENDENCIES) - 2)
             subprocess.run(['python3', str(helper), 'HEAD', self.version], cwd=root,
                            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             flags = root / '.cargo/config.toml'
@@ -160,6 +160,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         for version in ('0.1.0', '1.0.0', '0.1.0-alpha.0'):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 MODULE.expected_transition(self.base.__getitem__, self.target.__getitem__, version)
+
+    def test_inventory_matches_the_committed_ledger(self):
+        # A proof dependency added without updating the inventory only fails at release time.
+        ledger = Path(__file__).resolve().parents[2] / MODULE.LEDGER
+        self.assertEqual(set(json.loads(ledger.read_text())['dependency_sha256']), MODULE.DEPENDENCIES)
 
 
 if __name__ == '__main__':

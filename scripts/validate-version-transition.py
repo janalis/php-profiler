@@ -16,6 +16,7 @@ DEPENDENCIES = frozenset("""Cargo.lock
 Cargo.toml
 crates/php-profiler/Cargo.toml
 crates/php-profiler/build.rs
+crates/php-profiler/src/automatic.rs
 crates/php-profiler/src/bridge.c
 crates/php-profiler/src/lib.rs
 crates/php-profiler/src/sampling.c
@@ -29,13 +30,19 @@ crates/profiler-core/src/sampling.rs
 crates/profiler-core/src/serialization.rs
 crates/profiler-core/src/storage.rs
 docs/mutation-equivalence.md
+scripts/c-mutation-tests.sh
 scripts/link-native-faults.sh
+scripts/native-bailout-tests.py
+tests/native/automatic-transports.c
 tests/native/bailout-fault.c
 tests/native/bridge-unit.c
+tests/native/c-boundaries.php
 tests/native/frames-native.c
 tests/native/sampling-lifecycle-native.c
 tests/native/sampling-unit.c
 tests/support/adapter-contract.rs
+tests/support/automatic-contract.c
+tests/support/automatic-contract.rs
 tests/support/sampling-adapter-contract.rs""".splitlines())
 ALLOWED = frozenset({"Cargo.toml", "Cargo.lock", "CHANGELOG.md", LEDGER})
 
