@@ -322,12 +322,19 @@ static int profiler_materialize_server(void) {
     return success;
 }
 /* SAPI-owned request values only. Returns -1 without a trusted trigger header,
- * 0 for a header that does not match and 1 for a match. */
+ * -2 when the process environment defines one, 0 for a header that does not match
+ * and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
-    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the
-     * process environment: an inherited value is indistinguishable from a header. */
-    if (!strcmp(sapi_module.name, "cli") || getenv("HTTP_X_PHP_PROFILER_TRIGGER"))
+    if (!strcmp(sapi_module.name, "cli"))
         return -1;
+    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the
+     * process environment: an inherited value is indistinguishable from a header.
+     * putenv() in another ZTS request thread may rewrite environ meanwhile. */
+    tsrm_env_lock();
+    int inherited = getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL;
+    tsrm_env_unlock();
+    if (inherited)
+        return -2;
     const char *value = NULL;
     if (sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",

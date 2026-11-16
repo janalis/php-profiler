@@ -161,12 +161,14 @@ For FPM, place these settings in the PHP INI loaded by the pool, or use pool
 `output_dir` disables automatic capture with a logged configuration error when
 capture is requested. The secret is only needed in trigger mode and is compared
 byte for byte. An empty secret, one longer than 4096 bytes or one containing a
-comma is a configuration error, logged whenever a request carries the trigger header.
+comma or a NUL byte is a configuration error, logged whenever a request carries the
+trigger header.
 Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`. A value inherited from the PHP
 process environment never triggers a capture: while the environment defines
-`HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores every request. This covers the CLI, phpdbg,
+`HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores every request and logs a configuration
+error for each one outside the CLI. This covers the CLI, phpdbg,
 embed hosts and the environment fallback of `php-cgi`; classic CGI, where the web server
 passes headers through the environment, is not supported. Combined/comma-separated
 trigger values are rejected.

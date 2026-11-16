@@ -50,8 +50,14 @@ fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
                 match unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } {
                     // Without a trigger header nothing was requested, so nothing is logged.
                     -1 => return Ok(()),
+                    // The process environment would shadow every request's header.
+                    -2 => return Err(()),
                     // A secret no trigger header can ever match is a configuration error.
-                    _ if secret.is_empty() || secret.len() > 4096 || secret.contains(&b',') => {
+                    _ if secret.is_empty()
+                        || secret.len() > 4096
+                        || secret.contains(&b',')
+                        || secret.contains(&0) =>
+                    {
                         return Err(());
                     }
                     1 => {}

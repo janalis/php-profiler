@@ -443,3 +443,15 @@ longer repeats the freeze already performed before automatic finalization. These
 changes renew the source and dependency hashes only. They add no native mutation
 classification; the private transport contract and the built-in server, phpdbg and
 php-cgi integration checks must kill the new trigger mutants.
+
+### Review fixes: environment diagnostics and locking
+
+This renewal edits `bridge.c` only from line 325 onward, after every recorded
+coordinate, so all audited spans are byte-identical. `profiler_trigger_matches` reads
+the process environment under `tsrm_env_lock()`, as PHP's own `getenv()` does, and
+returns -2 when the environment defines `HTTP_X_PHP_PROFILER_TRIGGER`; the Rust adapter
+logs that as a configuration error instead of treating it as a missing header. The
+adapter also rejects trigger secrets containing a NUL byte. These changes renew the
+source and dependency hashes only and add no native mutation classification; the
+bridge unit test, the phpdbg and php-cgi environment checks and the built-in server
+NUL-secret case must kill the new mutants.

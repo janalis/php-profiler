@@ -39,15 +39,40 @@ def free_port():
 
 
 def trigger_settings(directory, secret):
+    """PHP options without any host INI; run with PHP_INI_SCAN_DIR set to ''."""
+    if b'\0' in secret:
+        # Only a quoted INI string carries a NUL byte; -c replaces php.ini as -n would skip it.
+        ini = directory / 'secret.ini'
+        ini.write_bytes(b'php_profiler.trigger_secret="' + secret + b'"\n')
+        source = ['-c', str(ini)]
+    else:
+        source = ['-n', '-d', b'php_profiler.trigger_secret=' + secret]
     # OPcache stays enabled for the built-in server even with -n; a cached script may inline leaf().
-    return ['-d', 'opcache.enable=0', '-d', 'extension=' + extension, '-d', 'php_profiler.mode=trigger',
-            '-d', b'php_profiler.trigger_secret=' + secret, '-d', 'php_profiler.output_dir=' + str(directory)]
+    return [*source, '-d', 'opcache.enable=0', '-d', 'extension=' + extension, '-d', 'php_profiler.mode=trigger',
+            '-d', 'php_profiler.output_dir=' + str(directory)]
+
+
+def wait_until_ready(process, ready, what):
+    for attempt in range(200):
+        if ready():
+            return
+        assert process.poll() is None, f'{what} exited during startup'
+        time.sleep(0.05)
+    raise RuntimeError(f'{what} startup timed out')
+
+
+def accepts(port):
+    try:
+        socket.create_connection(('127.0.0.1', port), timeout=1).close()
+        return True
+    except OSError:
+        return False
 
 
 def built_in_server_checks(output):
     """The built-in server exposes headers only through _SERVER, never the process environment."""
     (output / 'server.php').write_text('<?php function leaf() {} leaf(); echo "ok";')
-    environment = dict(php_environment)
+    environment = dict(php_environment, PHP_INI_SCAN_DIR='')
     environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
     for secret, cases in (
         (b'test-secret', [(None, False), (b'wrong', False), (b'test-secret,other', False), (b'test-secret', True)]),
@@ -57,21 +82,17 @@ def built_in_server_checks(output):
         (b'', [(None, False), (b'', False), (b'x', False)]),
         (b'a,b', [(None, False), (b'a,b', False)]),
         (b'x' * 4097, [(None, False), (b'x' * 4097, False)]),
+        # No header value can carry the NUL byte a quoted INI string can.
+        (b'a\0b', [(None, False), (b'a', False)]),
         # The longest usable secret still captures through a real header.
         (b'x' * 4096, [(b'x' * 4096, True)]),
     ):
         port = free_port()
-        command = ['php', '-n', *trigger_settings(output, secret), '-S', f'127.0.0.1:{port}', '-t', str(output)]
+        command = ['php', *trigger_settings(output, secret), '-S', f'127.0.0.1:{port}', '-t', str(output)]
         with tempfile.TemporaryFile() as errors, subprocess.Popen(
                 command, env=environment, stdout=subprocess.DEVNULL, stderr=errors) as server:
             try:
-                for attempt in range(200):
-                    try:
-                        socket.create_connection(('127.0.0.1', port), timeout=1).close()
-                        break
-                    except OSError:
-                        assert server.poll() is None, 'PHP HTTP server exited'
-                        time.sleep(0.05)
+                wait_until_ready(server, lambda: accepts(port), 'PHP HTTP server')
                 for token, captured in cases:
                     connection = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
                     connection.putrequest('GET', '/server.php')
@@ -100,51 +121,70 @@ def built_in_server_checks(output):
         reject_sanitizer_diagnostics(log.decode(errors='replace'), 'automatic built-in server')
         assert not list(output.glob('*.json')), secret
         # One log line per requested capture with an unusable secret, none without a header.
-        unusable = not secret or len(secret) > 4096 or b',' in secret
+        unusable = not secret or len(secret) > 4096 or b',' in secret or b'\0' in secret
         requested = sum(1 for token, captured in cases if token is not None)
         assert log.count(b'automatic capture failed') == (requested if unusable else 0), (secret, log)
     print('automatic built-in server trigger checks passed')
 
 
+class FastCgi(FpmServer):
+    """php-cgi -b speaks the same FastCGI protocol as FPM but reads the process environment."""
+    def __init__(self, settings, environment):
+        super().__init__()
+        self.settings = settings
+        self.environment = environment
+
+    def __enter__(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='php-profiler-cgi-')
+        self.address = os.path.join(self.directory.name, 'cgi.sock')
+        self.errors = tempfile.TemporaryFile()
+        self.process = subprocess.Popen(['php-cgi', *self.settings, '-b', self.address], env=self.environment,
+                                        stdout=subprocess.DEVNULL, stderr=self.errors)
+        try:
+            wait_until_ready(self.process, lambda: os.path.exists(self.address), 'php-cgi')
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        try:
+            super().__exit__(exception_type, exception, traceback)
+        finally:
+            self.errors.seek(0)
+            log = self.errors.read()
+            self.errors.close()
+        if exception is None:
+            reject_sanitizer_diagnostics(log.decode(errors='replace'), 'automatic php-cgi')
+
+
 def inherited_environment_checks(output):
-    """SAPIs that read the process environment must never take a trigger from it."""
-    environment = dict(php_environment, HTTP_X_PHP_PROFILER_TRIGGER='test-secret')
+    """SAPIs that read the process environment never take a trigger from it, and say why."""
+    environment = dict(php_environment, HTTP_X_PHP_PROFILER_TRIGGER='test-secret', PHP_INI_SCAN_DIR='')
     script = output / 'environment.php'
     script.write_text('<?php echo "ok";')
     settings = trigger_settings(output, b'test-secret')
     if shutil.which('phpdbg'):
-        result = run_php(['phpdbg', '-n', *settings, '-qrr', str(script)], env=environment,
+        # phpdbg drops log messages unless error_log names a file.
+        log = output / 'phpdbg.log'
+        result = run_php(['phpdbg', *settings, '-d', f'error_log={log}', '-qrr', str(script)], env=environment,
                          capture_output=True, check=True)
-        assert result.stdout.endswith(b'ok') and b'automatic capture failed' not in result.stderr, result
+        assert result.stdout.endswith(b'ok') and log.read_bytes().count(b'automatic capture failed') == 1, result
+        log.unlink()
         assert not list(output.glob('*.json')), 'phpdbg environment must not trigger a capture'
         print('automatic phpdbg environment check passed')
     else:
         print('automatic phpdbg environment check skipped: phpdbg unavailable')
     if shutil.which('php-cgi'):
-        class FastCgi(FpmServer):
-            def __init__(self, environment):
-                super().__init__()
-                self.environment = environment
-
-            def __enter__(self):
-                self.directory = tempfile.TemporaryDirectory(prefix='php-profiler-cgi-')
-                self.address = os.path.join(self.directory.name, 'cgi.sock')
-                self.process = subprocess.Popen(['php-cgi', '-n', *settings, '-b', self.address], env=self.environment,
-                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                for attempt in range(200):
-                    if os.path.exists(self.address):
-                        return self
-                    assert self.process.poll() is None, self.process.communicate()
-                    time.sleep(0.05)
-                raise RuntimeError('php-cgi socket startup timed out')
-        with FastCgi(environment) as server:
+        with FastCgi(settings, environment) as server:
             response = server.request_raw(str(script))
-            assert response['body'] == b'ok' and not response['stderr'], response
+            assert response['body'] == b'ok', response
+            assert response['stderr'].count(b'automatic capture failed') == 1, response
             assert b'X-Php-Profiler-Id' not in response['headers'], response
         assert not list(output.glob('*.json')), 'php-cgi environment fallback must not trigger a capture'
-        clean = dict(php_environment)
-        clean.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
-        with FastCgi(clean) as server:
+        clean = dict(environment)
+        clean.pop('HTTP_X_PHP_PROFILER_TRIGGER')
+        with FastCgi(settings, clean) as server:
             response = server.request_raw(str(script), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
             assert response['body'] == b'ok' and not response['stderr'], response
             assert b'X-Php-Profiler-Id' in response['headers'], response
@@ -154,7 +194,6 @@ def inherited_environment_checks(output):
         print('automatic php-cgi environment check passed')
     else:
         print('automatic php-cgi environment check skipped: php-cgi unavailable')
-
 
 extension = os.environ['PROFILER_EXTENSION']
 with tempfile.TemporaryDirectory() as directory:
