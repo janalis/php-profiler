@@ -28,7 +28,7 @@ fn set(name: &str, value: &str) {
     );
 }
 pub fn probe() {
-    assert_eq!(setting("not_registered"), "");
+    assert!(setting("not_registered").is_empty());
     let number = unsafe { profiler_test_config_number() };
     assert!(number > 0);
     // Exercise both operations against the current request's table on ZTS.
@@ -39,7 +39,7 @@ pub fn probe() {
     unsafe {
         profiler_test_config_type(previous);
     }
-    assert_eq!(setting("mode"), "off");
+    assert_eq!(setting("mode"), b"off");
     let directory =
         std::env::temp_dir().join(format!("profiler-auto-contract-{}", std::process::id()));
     std::fs::create_dir(&directory).unwrap();

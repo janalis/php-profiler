@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Never take an automatic capture trigger from the PHP process environment (phpdbg, embed hosts and `php-cgi`'s environment fallback).
+- Compare trigger secrets byte for byte instead of through a lossy UTF-8 conversion.
+- Log unusable trigger secrets only for requests that carry the trigger header.
+
 ## [0.1.0-alpha.3] - 2026-11-16
 
 ### Commits

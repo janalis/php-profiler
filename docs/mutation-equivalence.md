@@ -426,3 +426,20 @@ The Rust adapter now accepts PHP's unquoted false keywords (passed as `""`) for
 uses `getentropy(3)` instead of opening `/dev/urandom`, and reuses the identity
 capacity constant. These changes renew the automatic adapter and private contract
 hashes only. They add no native mutation classification.
+
+### Review fixes: trigger source, secret bytes and request-scoped logging
+
+This renewal edits `bridge.c` only from line 321 onward, after every recorded
+coordinate, so all audited spans and the 318:17–18 materialization assignment are
+byte-identical. `profiler_trigger_matches` now refuses a trigger whenever the process
+environment defines `HTTP_X_PHP_PROFILER_TRIGGER`, and returns -1 when no trusted
+header exists, 0 for a non-matching header and 1 for a match. Its only call to the
+materialization helper still tests logical zero/nonzero; a failure now returns -1
+instead of 0, which no audited proof inspects.
+
+The Rust adapter reads INI values as exact bytes and validates the trigger secret only
+after a header arrives, so CLI requests never log secret errors. Request shutdown no
+longer repeats the freeze already performed before automatic finalization. These
+changes renew the source and dependency hashes only. They add no native mutation
+classification; the private transport contract and the built-in server, phpdbg and
+php-cgi integration checks must kill the new trigger mutants.

@@ -1279,9 +1279,6 @@ unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
     automatic::finish();
     STATE.with(|s| {
         let mut s = s.borrow_mut();
-        s.enabled = false;
-        update_active(&s);
-        freeze_all(&mut s, "request_shutdown");
         sampling::prepare_reports(&mut s);
         for session in &mut s.sessions {
             if session.engine.is_some() {

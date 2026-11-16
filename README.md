@@ -150,16 +150,23 @@ A successfully started HTTP capture queues `X-Php-Profiler-Id`. Its report is
 capture, not guaranteed persistence. CLI emits no header. Errors are logged and
 application execution continues. Reports are private; operators must arrange
 retention and cleanup. No report download endpoint is provided. Existing PHP API
-stop, disable and reset operations also apply to automatic sessions.
+stop, disable and reset operations also apply to automatic sessions. An automatic
+capture occupies one of the 16 sessions a request may hold and takes the first
+session ID, so applications see one fewer slot for their own sessions.
 
 For FPM, place these settings in the PHP INI loaded by the pool, or use pool
 `php_admin_value[php_profiler.mode] = trigger` and corresponding
 `php_admin_value[...]` entries for the other settings, then reload FPM. Configure
 `timeline` and `sampling` with `0` or `1`; both default to `0`. An empty
 `output_dir` disables automatic capture with a logged configuration error when
-capture is requested. The secret is only needed in trigger mode, where an empty
-secret, one longer than 4096 bytes or one containing a comma is also a logged
-configuration error. Keep its value out of public PHP configuration diagnostics;
+capture is requested. The secret is only needed in trigger mode and is compared
+byte for byte. An empty secret, one longer than 4096 bytes or one containing a
+comma is a configuration error, logged whenever a request carries the trigger header.
+Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
-trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; CLI environment variables
-cannot trigger a capture. Combined/comma-separated trigger values are rejected.
+trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`. A value inherited from the PHP
+process environment never triggers a capture: while the environment defines
+`HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores every request. This covers the CLI, phpdbg,
+embed hosts and the environment fallback of `php-cgi`; classic CGI, where the web server
+passes headers through the environment, is not supported. Combined/comma-separated
+trigger values are rejected.

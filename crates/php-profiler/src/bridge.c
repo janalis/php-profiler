@@ -321,28 +321,33 @@ static int profiler_materialize_server(void) {
     zend_end_try();
     return success;
 }
-/* SAPI-owned request values only: never fall back to process environment. */
+/* SAPI-owned request values only. Returns -1 without a trusted trigger header,
+ * 0 for a header that does not match and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
-    if (!strcmp(sapi_module.name, "cli") || !length || length > 4096)
-        return 0;
+    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the
+     * process environment: an inherited value is indistinguishable from a header. */
+    if (!strcmp(sapi_module.name, "cli") || getenv("HTTP_X_PHP_PROFILER_TRIGGER"))
+        return -1;
     const char *value = NULL;
     if (sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
                                    sizeof("HTTP_X_PHP_PROFILER_TRIGGER") - 1);
     } else {
-        /* Apache and the built-in HTTP server expose headers through _SERVER.
+        /* The built-in HTTP server exposes headers through _SERVER only.
          * Materialization is engine-owned, but may allocate: contain bailout. */
         if (!profiler_materialize_server())
-            return 0;
+            return -1;
         zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
         if (Z_TYPE_P(server) == IS_ARRAY) {
             zval *header =
                 zend_hash_str_find(Z_ARRVAL_P(server), ZEND_STRL("HTTP_X_PHP_PROFILER_TRIGGER"));
-            if (header && Z_TYPE_P(header) == IS_STRING && Z_STRLEN_P(header) <= 4096)
+            if (header && Z_TYPE_P(header) == IS_STRING)
                 value = Z_STRVAL_P(header);
         }
     }
-    if (!value || strnlen(value, 4097) != length || memchr(value, ',', length))
+    if (!value)
+        return -1;
+    if (!length || length > 4096 || strnlen(value, 4097) != length || memchr(value, ',', length))
         return 0;
     volatile unsigned char difference = 0;
     for (size_t i = 0; i < length; i++)
