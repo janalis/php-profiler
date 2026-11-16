@@ -4,6 +4,13 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-11-16
+
+### Commits
+
+- fix: list automatic capture proof inputs in the release transition inventory (#15)
+- feat: configure and trigger request profiling through HTTP headers (#13)
+
 ### Added
 
 - Automatic whole-request profiling configured through administrator-only INI settings, with authenticated HTTP triggers, response correlation IDs, and private JSON report files.
