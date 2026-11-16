@@ -157,7 +157,9 @@ For FPM, place these settings in the PHP INI loaded by the pool, or use pool
 `php_admin_value[...]` entries for the other settings, then reload FPM. Configure
 `timeline` and `sampling` with `0` or `1`; both default to `0`. An empty
 `output_dir` disables automatic capture with a logged configuration error when
-capture is requested. The secret is only needed in trigger mode. Keep its value
-out of public PHP configuration diagnostics. HTTP servers must forward the
+capture is requested. The secret is only needed in trigger mode, where an empty
+secret, one longer than 4096 bytes or one containing a comma is also a logged
+configuration error. Keep its value out of public PHP configuration diagnostics;
+PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; CLI environment variables
 cannot trigger a capture. Combined/comma-separated trigger values are rejected.

@@ -54,6 +54,15 @@ with tempfile.TemporaryDirectory() as directory:
                      capture_output=True, check=True)
     assert ignored.stdout == b'ok' and not ignored.stderr
     assert not list(output.glob('*.json')), 'CLI environment must not activate HTTP trigger mode'
+    # Secrets no trigger header can match are logged configuration errors.
+    for secret, rejected in (('', True), ('test,secret', True), ('x' * 4097, True), ('x' * 4096, False)):
+        checked = run_php(['php', '-n', '-d', 'extension=' + extension,
+                           '-d', 'php_profiler.mode=trigger', '-d', 'php_profiler.trigger_secret=' + secret,
+                           '-d', 'php_profiler.output_dir=' + directory, '-r', 'echo "ok";'],
+                          capture_output=True, check=True)
+        assert checked.stdout == b'ok', checked
+        assert (b'automatic capture failed' in checked.stderr) == rejected, (len(secret), checked)
+        assert not list(output.glob('*.json'))
     fixture = output / 'request.php'
     fixture.write_text('<?php function leaf() {} leaf(); echo "ok";')
     settings = {'php_profiler.mode': 'trigger', 'php_profiler.trigger_secret': 'test-secret',
@@ -155,6 +164,29 @@ with tempfile.TemporaryDirectory() as directory:
             if source.startswith('register_shutdown'):
                 assert report['functions']['shutdown_leaf']['calls'] == 1
             path.unlink()
+    # PHP's INI parser passes unquoted Off/false/no/none as "" and On/true/yes as "1".
+    for word in ('off', 'Off', 'false', 'none', ''):
+        result = run_php(base + ['-d', 'php_profiler.mode=' + word, '-r', 'echo "ok";'],
+                         capture_output=True, check=True)
+        assert result.stdout == b'ok' and not result.stderr, (word, result)
+        assert not list(output.glob('*.json'))
+    for timeline, sampling, recorded in (('On', 'no', True), ('Off', 'false', False)):
+        result = run_php(base + ['-d', 'php_profiler.timeline=' + timeline,
+                                 '-d', 'php_profiler.sampling=' + sampling,
+                                 '-r', 'function leaf() {} leaf(); echo "ok";'],
+                         capture_output=True, check=True)
+        assert result.stdout == b'ok' and not result.stderr, (timeline, result)
+        reports = list(output.glob('*.json'))
+        assert len(reports) == 1, reports
+        assert bool(json.loads(reports[0].read_text())['timeline']) == recorded, timeline
+        reports[0].unlink()
+    # phpinfo() masks a configured trigger secret and still reports an unset one.
+    for secret, shown in (('hidden-secret-value', '********'), ('', 'no value')):
+        info = run_php(['php', '-n', '-d', 'extension=' + extension,
+                        '-d', 'php_profiler.trigger_secret=' + secret, '-i'],
+                       capture_output=True, check=True).stdout.decode()
+        assert f'php_profiler.trigger_secret => {shown} => {shown}' in info, info[-2000:]
+        assert 'hidden-secret-value' not in info
     os.mkdir(output / 'relative-directory')
     for name, value in [('mode', 'invalid'), ('max_events', '0'), ('max_events', '8193'),
                         ('timeline', 'invalid'), ('sampling', 'invalid'), ('output_dir', 'relative'), ('output_dir', directory + '/missing')]:

@@ -1,11 +1,12 @@
 use super::*;
-use std::{ffi::CString, io::Read};
+use std::ffi::CString;
 thread_local! { static SESSION: Cell<Option<i64>> = const { Cell::new(None) }; }
 unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
     fn profiler_config_unregister(number: i32);
     fn profiler_trigger_matches(secret: *const u8, length: usize) -> i32;
     fn profiler_auto_log();
+    fn getentropy(buffer: *mut std::ffi::c_void, length: usize) -> i32;
     #[cfg_attr(
         all(profiler_adapter_contract_tests, not(test)),
         link_name = "profiler_contract_auto_header"
@@ -27,17 +28,27 @@ fn setting(name: &str) -> String {
     }
     String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(ptr, len) }).into_owned()
 }
-pub fn start() {
-    start_with_entropy(std::path::Path::new("/dev/urandom"));
+/// System entropy without a device node, so chrooted FPM pools still work.
+fn system_entropy(buffer: &mut [u8; 16]) -> bool {
+    // SAFETY: the buffer is valid for its full length, well under the 256-byte limit.
+    unsafe { getentropy(buffer.as_mut_ptr().cast(), buffer.len()) == 0 }
 }
-fn start_with_entropy(entropy: &std::path::Path) {
+pub fn start() {
+    start_with_entropy(system_entropy);
+}
+fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
     SESSION.set(None);
     let result = (|| -> Result<(), ()> {
         match setting("mode").as_str() {
-            "off" => return Ok(()),
+            // Unquoted `Off`, `false`, `no` and `none` reach extensions as "".
+            "off" | "" => return Ok(()),
             "always" => {}
             "trigger" => {
                 let secret = setting("trigger_secret");
+                // A secret no trigger header can ever match is a configuration error.
+                if secret.is_empty() || secret.len() > 4096 || secret.contains(',') {
+                    return Err(());
+                }
                 // SAFETY: SAPI value is read synchronously, bounded and never retained.
                 let valid = unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } != 0;
                 if !valid {
@@ -52,20 +63,20 @@ fn start_with_entropy(entropy: &std::path::Path) {
             return Err(());
         }
         let boolean = |name| match setting(name).as_str() {
-            "0" => Ok(false),
+            "0" | "" => Ok(false),
             "1" => Ok(true),
             _ => Err(()),
         };
         let timeline = boolean("timeline")?;
         let sampling = boolean("sampling")?;
         let events: usize = setting("max_events").parse().map_err(|_| ())?;
-        if !(1..=8192).contains(&events) {
+        if !(1..=storage::IDENTITY_CAPACITY).contains(&events) {
             return Err(());
         }
         let mut random = [0u8; 16];
-        std::fs::File::open(entropy)
-            .and_then(|mut f| f.read_exact(&mut random))
-            .map_err(|_| ())?;
+        if !entropy(&mut random) {
+            return Err(());
+        }
         let id: String = random.iter().map(|b| format!("{b:02x}")).collect();
         let path = directory.join(format!("php-profile-{id}.json"));
         let path = path.to_str().ok_or(())?;

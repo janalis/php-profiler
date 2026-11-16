@@ -405,3 +405,24 @@ reviewed for the typed flag readers and the unchanged status consumer. This is
 an integer truthiness proof, not an additional noncanonical Boolean exception.
 Raw Killed/Survived results remain collector outputs; the strict classifier
 subtracts this entry only when this exact candidate is reported Survived.
+
+### Review fixes: secret display, INI keywords and entropy
+
+The review renewal keeps every recorded `bridge.c` coordinate. The appended blank
+line before `PHP_INI_BEGIN()` became the static displayer prototype, the trigger
+secret entry gained that displayer on its existing line, and the displayer body was
+appended after all audited spans. The 318:17–18 materialization assignment and the
+historical 11,832-byte prefix are byte-identical; only `source_sha256` values and
+the bridge dependency hash changed.
+
+The displayer prints a fixed mask for a nonempty secret and `no value` otherwise.
+It reads only the registered entry value, never the SAPI or flag structures, and
+does not participate in sampling, admission or report persistence. Its mutants are
+not classified by this ledger; PHP integration checks of `php -i` output with a
+configured and an unset secret must kill them.
+
+The Rust adapter now accepts PHP's unquoted false keywords (passed as `""`) for
+`mode` and the Boolean settings, rejects trigger secrets that no header could match,
+uses `getentropy(3)` instead of opening `/dev/urandom`, and reuses the identity
+capacity constant. These changes renew the automatic adapter and private contract
+hashes only. They add no native mutation classification.

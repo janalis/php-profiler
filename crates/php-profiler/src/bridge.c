@@ -300,10 +300,10 @@ int profiler_resolve_path(const char *path, unsigned char *output, size_t capaci
     zend_end_try();
     return success;
 }
-
+static ZEND_INI_DISP(profiler_secret_display);
 PHP_INI_BEGIN()
 PHP_INI_ENTRY("php_profiler.mode", "off", PHP_INI_SYSTEM, NULL)
-PHP_INI_ENTRY("php_profiler.trigger_secret", "", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY_EX("php_profiler.trigger_secret", "", PHP_INI_SYSTEM, NULL, profiler_secret_display)
 PHP_INI_ENTRY("php_profiler.output_dir", "", PHP_INI_SYSTEM, NULL)
 PHP_INI_ENTRY("php_profiler.timeline", "0", PHP_INI_SYSTEM, NULL)
 PHP_INI_ENTRY("php_profiler.sampling", "0", PHP_INI_SYSTEM, NULL)
@@ -370,4 +370,10 @@ int profiler_auto_header(const char *value) {
     zend_catch { profiler_defer_bailout(); }
     zend_end_try();
     return success;
+}
+/* phpinfo() must never print the trigger secret. System-only entries have no
+ * separate local value, so both columns describe the same configured value. */
+static ZEND_INI_DISP(profiler_secret_display) {
+    (void)type;
+    php_printf("%s", ini_entry->value && ZSTR_LEN(ini_entry->value) ? "********" : "no value");
 }

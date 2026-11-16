@@ -49,7 +49,7 @@ pub fn probe() {
     start(); // CLI ignores even a configured trigger.
     assert!(SESSION.get().is_none());
     set("mode", "always");
-    start_with_entropy(std::path::Path::new("/nonexistent-profiler-entropy"));
+    start_with_entropy(|_| false);
     assert!(SESSION.get().is_none());
     // A manual record before the automatic one proves ID-based selection.
     let manual = Profiler::start(None, false, 1).unwrap();
