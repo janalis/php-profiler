@@ -415,7 +415,7 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     automatic_test_value = "secret";
     automatic_fault = 3;
     AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 1);
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     automatic_fault = 0;
     sapi_module.name = "contract-http";
     sapi_module.getenv = automatic_test_getenv;
@@ -426,6 +426,9 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 0) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 4097) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secrex", 6) == 0);
     char maximum[4097];
     memset(maximum, 'x', 4096);
@@ -447,7 +450,7 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches(guarded + page - 6, 6) == 1);
     AUTOMATIC_ASSERT(munmap(guarded, page * 2) == 0);
     automatic_test_value = NULL;
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     automatic_test_value = "short";
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
     automatic_test_value = "a,b";
@@ -456,11 +459,11 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     zend_is_auto_global_str(ZEND_STRL("_SERVER"));
     zval saved = PG(http_globals)[TRACK_VARS_SERVER];
     ZVAL_NULL(&PG(http_globals)[TRACK_VARS_SERVER]);
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     array_init(&PG(http_globals)[TRACK_VARS_SERVER]);
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     add_assoc_long(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", 42);
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER",
                      oversized);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
@@ -468,6 +471,9 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)maximum, 4096) == 1);
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "other", 1) == 0);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     automatic_fault = 3;
     AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 0);
     automatic_fault = 0;
@@ -499,7 +505,7 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         add_assoc_string(server, "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
         automatic_fault = 4;
         int status = profiler_trigger_matches((const unsigned char *)"secret", 6);
-        correct = status == 0 && profiler_flags.pending_bailout;
+        correct = status == -1 && profiler_flags.pending_bailout;
     } else if (mode && strcmp(mode, "log") == 0) {
         automatic_fault = 1;
         profiler_auto_log();

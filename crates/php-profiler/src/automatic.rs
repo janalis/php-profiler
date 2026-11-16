@@ -19,14 +19,15 @@ pub fn register(number: i32) -> i32 {
 pub fn unregister(number: i32) {
     unsafe { profiler_config_unregister(number) }
 }
-fn setting(name: &str) -> String {
+/// Exact INI bytes: a lossy conversion would silently change secrets and paths.
+fn setting(name: &str) -> Vec<u8> {
     let name = format!("php_profiler.{name}");
     let mut len = 0;
     let ptr = unsafe { profiler_ini(name.as_ptr(), name.len(), &mut len) };
     if ptr.is_null() {
-        return String::new();
+        return Vec::new();
     }
-    String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(ptr, len) }).into_owned()
+    unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
 }
 /// System entropy without a device node, so chrooted FPM pools still work.
 fn system_entropy(buffer: &mut [u8; 16]) -> bool {
@@ -39,37 +40,42 @@ pub fn start() {
 fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
     SESSION.set(None);
     let result = (|| -> Result<(), ()> {
-        match setting("mode").as_str() {
+        match setting("mode").as_slice() {
             // Unquoted `Off`, `false`, `no` and `none` reach extensions as "".
-            "off" | "" => return Ok(()),
-            "always" => {}
-            "trigger" => {
+            b"off" | b"" => return Ok(()),
+            b"always" => {}
+            b"trigger" => {
                 let secret = setting("trigger_secret");
-                // A secret no trigger header can ever match is a configuration error.
-                if secret.is_empty() || secret.len() > 4096 || secret.contains(',') {
-                    return Err(());
-                }
                 // SAFETY: SAPI value is read synchronously, bounded and never retained.
-                let valid = unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } != 0;
-                if !valid {
-                    return Ok(());
+                match unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } {
+                    // Without a trigger header nothing was requested, so nothing is logged.
+                    -1 => return Ok(()),
+                    // A secret no trigger header can ever match is a configuration error.
+                    _ if secret.is_empty() || secret.len() > 4096 || secret.contains(&b',') => {
+                        return Err(());
+                    }
+                    1 => {}
+                    _ => return Ok(()),
                 }
             }
             _ => return Err(()),
         }
-        let dir = setting("output_dir");
+        let dir = String::from_utf8(setting("output_dir")).map_err(|_| ())?;
         let directory = std::path::Path::new(&dir);
         if !directory.is_absolute() || !directory.is_dir() {
             return Err(());
         }
-        let boolean = |name| match setting(name).as_str() {
-            "0" | "" => Ok(false),
-            "1" => Ok(true),
+        let boolean = |name| match setting(name).as_slice() {
+            b"0" | b"" => Ok(false),
+            b"1" => Ok(true),
             _ => Err(()),
         };
         let timeline = boolean("timeline")?;
         let sampling = boolean("sampling")?;
-        let events: usize = setting("max_events").parse().map_err(|_| ())?;
+        let events: usize = std::str::from_utf8(&setting("max_events"))
+            .map_err(|_| ())?
+            .parse()
+            .map_err(|_| ())?;
         if !(1..=storage::IDENTITY_CAPACITY).contains(&events) {
             return Err(());
         }
