@@ -20,7 +20,7 @@ These distinctions follow [GitHub's token event policy](https://docs.github.com/
 
 ## Restricted version transition
 
-`scripts/validate-version-transition.py BASE_SHA VERSION --apply` derives a ledger update from immutable base bytes. Before changing anything it requires the exact 25-input dependency inventory and verifies every base dependency hash. It proves that only workspace package version text and the two internal Cargo.lock package versions changed; editions, dependency versions, lock text outside those entries, build.rs, build flags represented by audited inputs, runtime sources, fixtures, and all other proof dependencies remain identical.
+`scripts/validate-version-transition.py BASE_SHA VERSION --apply` derives a ledger update from immutable base bytes. Before changing anything it requires the exact 32-input dependency inventory and verifies every base dependency hash. It proves that only workspace package version text and the two internal Cargo.lock package versions changed; editions, dependency versions, lock text outside those entries, build.rs, build flags represented by audited inputs, runtime sources, fixtures, and all other proof dependencies remain identical.
 
 Only the Cargo.toml and Cargo.lock dependency SHA-256 values may change. Source spans, replacements, native compiler/libc contexts, equivalent classifications, and every other ledger byte remain unchanged. Missing/stale hashes, changed native contexts, extra lock entries, source edits and arbitrary ledger edits are rejected. The receipt at `target/version-transition.json` records the base SHA, actual old/new hashes, ledger hashes and unchanged-input count. It is evidence of a version transition, not a replacement for native validation.
 
