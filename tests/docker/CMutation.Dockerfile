@@ -11,8 +11,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=php_sdk /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # The exact audited libc is no longer on the rolling mirror. Signed historical
 # Release metadata retains its signature; only its time-based expiry is disabled.
+# The snapshot service intermittently answers 5xx; retry with backoff instead of
+# failing the build. Pinned versions and signature checks are unchanged.
 RUN sed -i -E 's#http://(archive.ubuntu.com/ubuntu/|security.ubuntu.com/ubuntu/)#https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/#g' /etc/apt/sources.list.d/ubuntu.sources \
-    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-profiler-snapshot \
+    && printf '%s\n' 'Acquire::Check-Valid-Until "false";' 'Acquire::Retries "12";' \
+       'Acquire::Retries::Delay::Maximum "60";' > /etc/apt/apt.conf.d/99-profiler-snapshot \
     && apt-get -o APT::Update::Error-Mode=any update && apt-get install -y --no-install-recommends 'clang-19=1:19.1.1-1ubuntu1~24.04.2' 'libclang-cpp19=1:19.1.1-1ubuntu1~24.04.2' 'libclang-19-dev=1:19.1.1-1ubuntu1~24.04.2' \
     ca-certificates curl python3 pkg-config gcc 'libc6=2.39-0ubuntu8.9' 'libc6-dev=2.39-0ubuntu8.9' 'libc-dev-bin=2.39-0ubuntu8.9' 'libc-bin=2.39-0ubuntu8.9' ripgrep \
     libargon2-1 libcurl4t64 libedit2 libonig5 libsodium23 libsqlite3-0 libssl3t64 libxml2 libpcre2-8-0 zlib1g \
