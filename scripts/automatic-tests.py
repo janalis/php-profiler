@@ -39,7 +39,8 @@ def free_port():
 
 
 def trigger_settings(directory, secret):
-    return ['-d', 'extension=' + extension, '-d', 'php_profiler.mode=trigger',
+    # OPcache stays enabled for the built-in server even with -n; a cached script may inline leaf().
+    return ['-d', 'opcache.enable=0', '-d', 'extension=' + extension, '-d', 'php_profiler.mode=trigger',
             '-d', b'php_profiler.trigger_secret=' + secret, '-d', 'php_profiler.output_dir=' + str(directory)]
 
 
