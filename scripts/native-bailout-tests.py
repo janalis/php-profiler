@@ -20,6 +20,18 @@ if sys.platform == 'darwin':
                     'tests/native/bailout-fault.c', '-o', str(helper)], check=True)
 outer_reports = tempfile.TemporaryDirectory(prefix='profiler-native-boundary-reports-')
 if os.environ.get('PROFILER_C_UNIT_BOUNDARIES') == '1':
+    for mode in ('materialize', 'trigger', 'log', 'header'):
+        env = dict(os.environ, PROFILER_TEST_AUTOMATIC_BAILOUT=mode)
+        from process_groups import ProcessGroups
+        with ProcessGroups() as processes:
+            result = processes.run([os.environ.get('PHP', 'php'), '-n', '-d',
+                                    'extension=' + env['PROFILER_EXTENSION'], '-r',
+                                    'profiler_test_automatic_bailout();'],
+                                   env=env, capture_output=True, text=True, timeout=30)
+        reject_sanitizer_diagnostics(result.stdout + "\n" + result.stderr, "automatic native bailout")
+        if result.returncode != 0 or 'AUTOMATIC_C_GUARD_OK' not in result.stdout:
+            sys.exit(f'{mode}: automatic guard failed: {result.returncode}: {result.stdout}{result.stderr}')
+        print(mode + ': isolated automatic C bailout contract passed')
     for mode in ('decode', 'string', 'allowed', 'resolve', 'exact', 'ini'):
         env = dict(os.environ, PROFILER_TEST_BAILOUT=mode)
         if sys.platform == 'darwin':
@@ -34,7 +46,7 @@ if os.environ.get('PROFILER_C_UNIT_BOUNDARIES') == '1':
         print(f'{mode}: cold native guard return/publication/rethrow contract passed')
 startup_modes = ['handle-api']
 if os.environ.get('PROFILER_C_UNIT_BOUNDARIES') == '1':
-    startup_modes += ['handles-negative', 'handles-capacity']
+    startup_modes += ['handles-negative', 'handles-capacity', 'ini-register']
 for mode in startup_modes:
     env = dict(os.environ, PROFILER_TEST_BAILOUT=mode)
     if sys.platform == 'darwin':
@@ -45,6 +57,8 @@ for mode in startup_modes:
     reject_sanitizer_diagnostics(result.stdout + "\n" + result.stderr, "native bailout boundary")
     output = result.stdout + result.stderr
     marker = 'INJECTED_HANDLE_API_FAILURE' if mode == 'handle-api' else 'INJECTED_HANDLE_COUNT_FAILURE'
+    if mode == 'ini-register':
+        marker = 'INJECTED_INI_REGISTER_FAILURE'
     if (result.returncode not in (254, 255) or marker not in output or
             'Unable to start' not in output or 'AFTER_MODULE_STARTUP' in output):
         sys.exit(f'{mode}: module failure was not safely rejected: {result.returncode}: {output}')

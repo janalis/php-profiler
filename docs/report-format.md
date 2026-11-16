@@ -120,3 +120,9 @@ The report accessors return the value shapes documented in the PHP stub:
 values directly, so PHP Reflection currently declares their return types as
 `mixed`. This is an arginfo limitation; it does not change the runtime value
 contract or JSON schema.
+
+Automatically configured captures finalized at request shutdown use
+`termination_reason: "request_complete"`. This expected lifecycle boundary does
+not by itself mark a report incomplete. Explicit PHP API stop/disable operations
+retain their existing termination reasons. The automatic HTTP response ID maps
+to the JSON filename and does not imply successful persistence.

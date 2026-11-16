@@ -65,3 +65,7 @@ subprocess.run([php, '-n', '-d', 'extension=' + str(extension), '-r',
 
 subprocess.run([php, "-n", "-d", "extension=" + str(extension), "tests/native/sampling-map-lifetime.php"],
                env=environment, check=True, timeout=30)
+
+subprocess.run([php, '-n', '-d', 'extension=' + str(extension), '-r',
+                'if (!profiler_adapter_contract_probe("automatic")) throw new RuntimeException("automatic lifecycle contract failed");'],
+               env=environment, check=True, timeout=30)

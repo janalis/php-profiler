@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Automatic whole-request profiling configured through administrator-only INI settings, with authenticated HTTP triggers, response correlation IDs, and private JSON report files.
+
 ## [0.1.0-alpha.2] - 2026-11-13
 
 ### Commits

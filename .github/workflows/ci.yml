@@ -341,6 +341,9 @@ jobs:
       - run: python3 scripts/zts-thread-tests.py
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
+      - run: python3 scripts/automatic-zts-tests.py
+        env:
+          PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
       - run: python3 scripts/engine-metadata-tests.py
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib

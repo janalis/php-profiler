@@ -79,6 +79,11 @@ fn main() {
         .expect("php-config required");
     assert!(output.status.success(), "php-config --includes failed");
     let mut build = cc::Build::new();
+    if std::env::var_os("PROFILER_ADAPTER_CONTRACT_TEST").is_some() {
+        println!("cargo:rerun-if-changed=../../tests/support/automatic-contract.rs");
+        println!("cargo:rerun-if-changed=../../tests/support/automatic-contract.c");
+        build.file("../../tests/support/automatic-contract.c");
+    }
     println!("cargo:rerun-if-env-changed=PROFILER_C_GCOV");
     if std::env::var_os("PROFILER_C_GCOV").is_some() {
         build.flag("--coverage");
@@ -111,10 +116,15 @@ fn main() {
         // Isolated native-test translation unit: never enabled in release builds.
         println!("cargo:rerun-if-changed=../../tests/native/bridge-unit.c");
         build.file("../../tests/native/bridge-unit.c");
+        println!("cargo:rerun-if-changed=../../tests/native/automatic-transports.c");
+        build.file("../../tests/native/automatic-transports.c");
         build.define("PROFILER_GUARD_UNIT_PRESENT", None);
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
             println!("cargo:rustc-link-arg=-Wl,--wrap=profiler_fiber_cleanup");
             println!("cargo:rustc-link-arg=-Wl,--wrap=profiler_fiber_destroy");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=sapi_header_op");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=zend_is_auto_global_str");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=zend_register_ini_entries");
         }
     } else {
         build.file("src/bridge.c");
