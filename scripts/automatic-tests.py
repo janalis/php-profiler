@@ -56,6 +56,8 @@ def built_in_server_checks(output):
         (b'', [(None, False), (b'', False), (b'x', False)]),
         (b'a,b', [(None, False), (b'a,b', False)]),
         (b'x' * 4097, [(None, False), (b'x' * 4097, False)]),
+        # The longest usable secret still captures through a real header.
+        (b'x' * 4096, [(b'x' * 4096, True)]),
     ):
         port = free_port()
         command = ['php', '-n', *trigger_settings(output, secret), '-S', f'127.0.0.1:{port}', '-t', str(output)]
@@ -322,6 +324,12 @@ with tempfile.TemporaryDirectory() as directory:
         result = run_php(base + ['-d', f'php_profiler.{name}={value}', '-r', 'echo "ok";'], capture_output=True)
         assert result.returncode == 0 and result.stdout == b'ok', result
         assert b'automatic capture failed' in result.stderr, result
+        assert not list(output.glob('*.json'))
+    # Exact INI bytes: values that are not UTF-8 or not numeric are configuration errors.
+    for setting in (b'php_profiler.max_events=\xff', b'php_profiler.max_events=many',
+                    b'php_profiler.output_dir=' + directory.encode() + b'/\xff'):
+        result = run_php(base + ['-d', setting, '-r', 'echo "ok";'], capture_output=True, check=True)
+        assert result.stdout == b'ok' and b'automatic capture failed' in result.stderr, (setting, result)
         assert not list(output.glob('*.json'))
     relative = run_php(base + ['-d', 'php_profiler.output_dir=relative-directory', '-r', 'echo "ok";'], cwd=directory, capture_output=True, check=True)
     assert relative.stdout == b'ok' and b'automatic capture failed' in relative.stderr
