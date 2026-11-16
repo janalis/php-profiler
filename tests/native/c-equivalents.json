@@ -332,7 +332,7 @@
     "tests/native/sampling-unit.c": "69edd0085f9899de64a5e8563446d532be2a712be8233cf35d0e048b594d514b",
     "tests/support/adapter-contract.rs": "f6056fc3d16466b612f201511080866ccfe56ea0bfc80d74adb3c2e913e64614",
     "tests/support/automatic-contract.c": "628d64d22b3ea116081f28dd2270a3202016874e744fbc2f166a1896a60d314f",
-    "tests/support/automatic-contract.rs": "bd350ec884398a771c77e47c14fae463fdfe8fc47b845b47ac9390363cfcb0e8",
+    "tests/support/automatic-contract.rs": "3c250e7d2228841577be323c1be68e901025e60ae354340741077319e69ff48a",
     "tests/support/sampling-adapter-contract.rs": "5fa261763c3c28e1f3cadb5d0e2aefb8e8f25ded359024933fecd3bbba763a7e"
   },
   "equivalents": [

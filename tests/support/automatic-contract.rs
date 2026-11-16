@@ -50,6 +50,10 @@ pub fn probe() {
     assert!(SESSION.get().is_none());
     set("mode", "always");
     start_with_entropy(|_| false);
+    // Capture IDs must come from real entropy, never an untouched zero buffer.
+    let (mut first, mut second) = ([0u8; 16], [0u8; 16]);
+    assert!(system_entropy(&mut first) && system_entropy(&mut second));
+    assert_ne!(first, second);
     assert!(SESSION.get().is_none());
     // A manual record before the automatic one proves ID-based selection.
     let manual = Profiler::start(None, false, 1).unwrap();
