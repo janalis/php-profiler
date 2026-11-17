@@ -4,6 +4,11 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Log a configuration error instead of silently ignoring trigger requests while the process environment defines `HTTP_X_PHP_PROFILER_TRIGGER`, and lock the environment while reading it on thread-safe builds.
+- Reject trigger secrets containing a NUL byte as a configuration error, since no header can match them.
+
 ## [0.1.0-alpha.4] - 2026-11-17
 
 ### Commits
@@ -15,8 +20,6 @@ All notable changes are documented here using Semantic Versioning.
 - Never take an automatic capture trigger from the PHP process environment (phpdbg, embed hosts and `php-cgi`'s environment fallback).
 - Compare trigger secrets byte for byte instead of through a lossy UTF-8 conversion.
 - Log unusable trigger secrets only for requests that carry the trigger header.
-- Log a configuration error instead of silently ignoring trigger requests while the process environment defines `HTTP_X_PHP_PROFILER_TRIGGER`, and lock the environment while reading it on thread-safe builds.
-- Reject trigger secrets containing a NUL byte as a configuration error, since no header can match them.
 
 ## [0.1.0-alpha.3] - 2026-11-16
 
