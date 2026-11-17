@@ -514,6 +514,23 @@ if sys.platform.startswith('linux'):
 # FrankenPHP's getenv serves only the process environment, so its headers come from _SERVER.
 # Its PHP build must match the extension's, so this runs only where FRANKENPHP names one.
 if os.environ.get('FRANKENPHP'):
+    def stop_frankenphp(process, errors, failure=None):
+        """Stops FrankenPHP and returns its log; diagnostics never mask an earlier failure."""
+        process.send_signal(signal.SIGINT)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        errors.seek(0)
+        log = errors.read()
+        errors.close()
+        if failure is not None:
+            failure.add_note(log.decode(errors='replace'))
+        else:
+            reject_sanitizer_diagnostics(log.decode(errors='replace'), 'FrankenPHP')
+        return log
+
     def frankenphp(directory, environment):
         configuration = Path(directory, 'conf')
         root = Path(directory, 'root')
@@ -531,12 +548,8 @@ if os.environ.get('FRANKENPHP'):
             env=dict(environment, PHP_INI_SCAN_DIR=str(configuration), PHPRC=str(configuration)))
         try:
             wait_until_ready(process, lambda: accepts(port), 'FrankenPHP')
-        except BaseException:
-            process.kill()
-            process.wait(timeout=10)
-            errors.seek(0)
-            print(errors.read().decode(errors='replace'), file=sys.stderr)
-            errors.close()
+        except BaseException as error:
+            stop_frankenphp(process, errors, error)
             raise
         return process, port, errors
 
@@ -557,13 +570,10 @@ if os.environ.get('FRANKENPHP'):
             try:
                 captured = [franken_request(port, token) is not None
                             for token in (None, 'wrong', 'franken-secret', 'franken-secret')]
-            finally:
-                process.send_signal(signal.SIGINT)
-                process.wait(timeout=10)
-                errors.seek(0)
-                log = errors.read()
-                errors.close()
-                reject_sanitizer_diagnostics(log.decode(errors='replace'), 'FrankenPHP')
+            except BaseException as error:
+                stop_frankenphp(process, errors, error)
+                raise
+            log = stop_frankenphp(process, errors)
             reports = list(Path(directory).glob('*.json'))
             # A clean environment captures real headers only; an inherited variable refuses
             # every request and is reported once.

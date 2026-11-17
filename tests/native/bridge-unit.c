@@ -470,7 +470,8 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     sapi_module.name = "cgi-fcgi";
     profiler_trigger_snapshot();
-    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
+    /* A differing value: reading the environment instead of the request cannot match. */
+    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "inherited", 1) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
     SG(request_info).request_method = original_method;
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
@@ -595,6 +596,12 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         correct &= profiler_flags.pending_bailout;
         profiler_flags.pending_bailout = false;
         automatic_fault = 0;
+        /* The process stays refused: a matching _SERVER value must still not capture. */
+        zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+        zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
+        if (Z_TYPE_P(server) != IS_ARRAY)
+            array_init(server);
+        add_assoc_string(server, "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
         int logs = automatic_test_logs;
         correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
         correct &= automatic_test_logs == logs && !profiler_flags.pending_bailout;
