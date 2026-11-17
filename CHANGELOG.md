@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] - 2026-11-17
+
+### Commits
+
+- fix: refuse empty release notes before the version bump merges (#31)
+
 ### Fixed
 
 - List commits that announce a breaking change only in their body among a release's commits, and refuse to prepare a release whose notes would be empty, instead of merging the version bump and then failing to publish it.
