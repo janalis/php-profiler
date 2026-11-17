@@ -456,3 +456,16 @@ adapter also rejects trigger secrets containing a NUL byte. These changes renew 
 source and dependency hashes only and add no native mutation classification; the
 bridge unit test, the phpdbg and php-cgi environment checks and the built-in server
 NUL-secret case must kill the new mutants.
+
+### Review fixes: refuse only the inherited trigger value
+
+This renewal again edits `bridge.c` only after every recorded coordinate, so all audited
+spans are byte-identical. Module startup now copies the inherited
+`HTTP_X_PHP_PROFILER_TRIGGER` value, and `profiler_trigger_matches` returns -2 only when
+the request's value equals that copy. php-cgi's fallback and the phpdbg and embed
+`_SERVER` import hand back exactly the inherited value; FPM, Apache and the built-in
+server pass the request's own header, which an inherited variable must not block. The
+Rust adapter logs the -2 result once per process. These changes renew the source and
+dependency hashes only and add no native mutation classification; the built-in server
+case with an inherited variable, the phpdbg and php-cgi environment checks and the bridge
+unit test must kill the new mutants.

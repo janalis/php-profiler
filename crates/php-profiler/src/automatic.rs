@@ -1,6 +1,8 @@
 use super::*;
 use std::ffi::CString;
+use std::sync::atomic::AtomicBool;
 thread_local! { static SESSION: Cell<Option<i64>> = const { Cell::new(None) }; }
+static INHERITED_LOGGED: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
     fn profiler_config_unregister(number: i32);
@@ -54,7 +56,8 @@ fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
                 match unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } {
                     // Without a trigger header nothing was requested, so nothing is logged.
                     -1 => return Ok(()),
-                    // The process environment would shadow every request's header.
+                    // The inherited value shadows every request: report it once per process.
+                    -2 if INHERITED_LOGGED.swap(true, Ordering::Relaxed) => return Ok(()),
                     -2 => return Err(()),
                     // A secret no trigger header can ever match is a configuration error.
                     _ if secret.is_empty()

@@ -72,21 +72,25 @@ def accepts(port):
 def built_in_server_checks(output):
     """The built-in server exposes headers only through _SERVER, never the process environment."""
     (output / 'server.php').write_text('<?php function leaf() {} leaf(); echo "ok";')
-    environment = dict(php_environment, PHP_INI_SCAN_DIR='')
-    environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
-    for secret, cases in (
-        (b'test-secret', [(None, False), (b'wrong', False), (b'test-secret,other', False), (b'test-secret', True)]),
+    for secret, cases, inherited in (
+        (b'test-secret', [(None, False), (b'wrong', False), (b'test-secret,other', False), (b'test-secret', True)], None),
+        # Only a header equal to the inherited value is refused, and logged once per process.
+        (b'test-secret', [(b'test-secret', True), (b'leaked', False), (None, False), (b'leaked', False)], 'leaked'),
         # Latin-1 bytes are compared exactly, never through a lossy UTF-8 conversion.
-        (b'caf\xe9', [(b'caf\xe9', True), ('caf\u00e9'.encode(), False)]),
+        (b'caf\xe9', [(b'caf\xe9', True), ('caf\u00e9'.encode(), False)], None),
         # Unusable secrets are configuration errors, logged only when a capture is requested.
-        (b'', [(None, False), (b'', False), (b'x', False)]),
-        (b'a,b', [(None, False), (b'a,b', False)]),
-        (b'x' * 4097, [(None, False), (b'x' * 4097, False)]),
+        (b'', [(None, False), (b'', False), (b'x', False)], None),
+        (b'a,b', [(None, False), (b'a,b', False)], None),
+        (b'x' * 4097, [(None, False), (b'x' * 4097, False)], None),
         # No header value can carry the NUL byte a quoted INI string can.
-        (b'a\0b', [(None, False), (b'a', False)]),
+        (b'a\0b', [(None, False), (b'a', False)], None),
         # The longest usable secret still captures through a real header.
-        (b'x' * 4096, [(b'x' * 4096, True)]),
+        (b'x' * 4096, [(b'x' * 4096, True)], None),
     ):
+        environment = dict(php_environment, PHP_INI_SCAN_DIR='')
+        environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
+        if inherited:
+            environment['HTTP_X_PHP_PROFILER_TRIGGER'] = inherited
         port = free_port()
         command = ['php', *trigger_settings(output, secret), '-S', f'127.0.0.1:{port}', '-t', str(output)]
         with tempfile.TemporaryFile() as errors, subprocess.Popen(
@@ -123,16 +127,17 @@ def built_in_server_checks(output):
         # One log line per requested capture with an unusable secret, none without a header.
         unusable = not secret or len(secret) > 4096 or b',' in secret or b'\0' in secret
         requested = sum(1 for token, captured in cases if token is not None)
-        assert log.count(b'automatic capture failed') == (requested if unusable else 0), (secret, log)
+        shadowed = inherited is not None and inherited.encode() in [token for token, captured in cases]
+        expected = requested if unusable else int(shadowed)
+        assert log.count(b'automatic capture failed') == expected, (secret, log)
     print('automatic built-in server trigger checks passed')
 
 
 class FastCgi(FpmServer):
     """php-cgi -b speaks the same FastCGI protocol as FPM but reads the process environment."""
     def __init__(self, settings, environment):
-        super().__init__()
+        super().__init__(environment=environment)
         self.settings = settings
-        self.environment = environment
 
     def __enter__(self):
         self.directory = tempfile.TemporaryDirectory(prefix='php-profiler-cgi-')
@@ -142,8 +147,8 @@ class FastCgi(FpmServer):
                                         stdout=subprocess.DEVNULL, stderr=self.errors)
         try:
             wait_until_ready(self.process, lambda: os.path.exists(self.address), 'php-cgi')
-        except BaseException:
-            self.__exit__(None, None, None)
+        except BaseException as failure:
+            self.__exit__(type(failure), failure, failure.__traceback__)
             raise
         return self
 
@@ -152,10 +157,12 @@ class FastCgi(FpmServer):
             super().__exit__(exception_type, exception, traceback)
         finally:
             self.errors.seek(0)
-            log = self.errors.read()
+            log = self.errors.read().decode(errors='replace')
             self.errors.close()
-        if exception is None:
-            reject_sanitizer_diagnostics(log.decode(errors='replace'), 'automatic php-cgi')
+        if exception is not None:
+            exception.add_note('php-cgi stderr:\n' + log)
+        else:
+            reject_sanitizer_diagnostics(log, 'automatic php-cgi')
 
 
 def inherited_environment_checks(output):
@@ -167,30 +174,37 @@ def inherited_environment_checks(output):
     if shutil.which('phpdbg'):
         # phpdbg drops log messages unless error_log names a file.
         log = output / 'phpdbg.log'
-        result = run_php(['phpdbg', *settings, '-d', f'error_log={log}', '-qrr', str(script)], env=environment,
-                         capture_output=True, check=True)
-        assert result.stdout.endswith(b'ok') and log.read_bytes().count(b'automatic capture failed') == 1, result
-        log.unlink()
+        try:
+            result = run_php(['phpdbg', *settings, '-d', f'error_log={log}', '-qrr', str(script)], env=environment,
+                             capture_output=True, check=True)
+            assert result.stdout.endswith(b'ok') and log.read_bytes().count(b'automatic capture failed') == 1, result
+        finally:
+            log.unlink(missing_ok=True)
         assert not list(output.glob('*.json')), 'phpdbg environment must not trigger a capture'
         print('automatic phpdbg environment check passed')
     else:
         print('automatic phpdbg environment check skipped: phpdbg unavailable')
     if shutil.which('php-cgi'):
         with FastCgi(settings, environment) as server:
-            response = server.request_raw(str(script))
-            assert response['body'] == b'ok', response
-            assert response['stderr'].count(b'automatic capture failed') == 1, response
-            assert b'X-Php-Profiler-Id' not in response['headers'], response
+            # The fallback hands every request the inherited value; one log line per process.
+            for logged in (1, 0):
+                response = server.request_raw(str(script))
+                assert response['body'] == b'ok', response
+                assert response['stderr'].count(b'automatic capture failed') == logged, response
+                assert b'X-Php-Profiler-Id' not in response['headers'], response
         assert not list(output.glob('*.json')), 'php-cgi environment fallback must not trigger a capture'
-        clean = dict(environment)
-        clean.pop('HTTP_X_PHP_PROFILER_TRIGGER')
-        with FastCgi(settings, clean) as server:
-            response = server.request_raw(str(script), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
-            assert response['body'] == b'ok' and not response['stderr'], response
-            assert b'X-Php-Profiler-Id' in response['headers'], response
-        reports = list(output.glob('*.json'))
-        assert len(reports) == 1, 'a real FastCGI trigger header must still capture'
-        reports[0].unlink()
+        for inherited in (None, 'leaked'):
+            changed = dict(environment)
+            changed.pop('HTTP_X_PHP_PROFILER_TRIGGER')
+            if inherited:
+                changed['HTTP_X_PHP_PROFILER_TRIGGER'] = inherited
+            with FastCgi(settings, changed) as server:
+                response = server.request_raw(str(script), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
+                assert response['body'] == b'ok' and not response['stderr'], response
+                assert b'X-Php-Profiler-Id' in response['headers'], response
+            reports = list(output.glob('*.json'))
+            assert len(reports) == 1, 'a real FastCGI trigger header must still capture'
+            reports[0].unlink()
         print('automatic php-cgi environment check passed')
     else:
         print('automatic php-cgi environment check skipped: php-cgi unavailable')
@@ -257,6 +271,17 @@ with tempfile.TemporaryDirectory() as directory:
         assert len(list(output.glob('*.json'))) == 2
         for path in output.glob('*.json'):
             path.unlink()
+        # FPM reads FastCGI parameters only: a variable in its startup environment never shadows them.
+        leaked = dict(php_environment, HTTP_X_PHP_PROFILER_TRIGGER='leaked')
+        with FpmServer(extension, settings, environment=leaked) as server:
+            response = server.request_raw(str(fixture), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
+            assert response['body'] == b'ok' and not response['stderr'], response
+            assert b'X-Php-Profiler-Id' in response['headers'], response
+            log = Path(server.directory.name) / 'error.log'
+            assert b'automatic capture failed' not in (log.read_bytes() if log.exists() else b'')
+        reports = list(output.glob('*.json'))
+        assert len(reports) == 1, 'FPM must capture a real header despite an inherited variable'
+        reports[0].unlink()
         for secret in ('', 'test-secret,other'):
             settings['php_profiler.trigger_secret'] = secret
             with FpmServer(extension, settings) as server:

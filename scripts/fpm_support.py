@@ -30,12 +30,13 @@ def exact(connection, length):
 
 
 class FpmServer:
-    def __init__(self, extension=None, ini_settings=None, workers=1):
+    def __init__(self, extension=None, ini_settings=None, workers=1, environment=None):
         if type(workers) is not int or workers < 1:
             raise ValueError("FPM worker count must be a positive integer")
         self.workers = workers
         self.extension = extension
         self.ini_settings = dict(ini_settings or {})
+        self.environment = environment
         self.process = None
         self.directory = None
 
@@ -61,7 +62,8 @@ clear_env = no
             command += ['-d', 'extension=' + self.extension]
         for name, value in self.ini_settings.items():
             command += ['-d', f'{name}={value}']
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.process = subprocess.Popen(command, env=self.environment, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
         try:
             for attempt in range(100):
                 if os.path.exists(self.address):
