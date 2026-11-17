@@ -491,10 +491,10 @@ recorded coordinate and renews the source and dependency hashes only; the bridge
 reads php-cgi through getenv and FrankenPHP through `_SERVER` with a differing getenv value,
 and the inherited variable differs from the header in the header-only SAPI checks.
 
-### Review fixes: retry a report whose logging bailed out
+### Review fixes: one SAPI-name matcher, report once
 
-The shared bridge logger now returns whether `php_log_err` completed. When the one-time
-report of an inherited variable bails out, the state returns to unreported so a later
-request reports it once. The edit is again after every recorded coordinate and renews the
-source and dependency hashes only; the isolated `inherited-log` bailout mode checks the
-deferred bailout, the single retried report and silence afterwards.
+Both SAPI lists now go through one delimited `strstr` helper evaluated at module startup.
+The report of an inherited variable stays once per process even when logging bails out:
+retrying would abort every request while logging keeps failing. The edit is again after
+every recorded coordinate and renews the source and dependency hashes only; the isolated
+`inherited-log` bailout mode checks the deferred bailout and that no later request logs.

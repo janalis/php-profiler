@@ -299,6 +299,7 @@ with tempfile.TemporaryDirectory() as directory:
             [os.environ.get('PHP_FPM', 'php-fpm'), '-n', '-d', 'extension=' + extension,
              *[f'-d{key}={value}' for key, value in settings.items()], '-i'],
             env=leaked, capture_output=True, timeout=60)
+        reject_sanitizer_diagnostics(information.stderr.decode(errors='replace'), 'php-fpm -i')
         assert information.returncode == 0 and b'php_profiler' in information.stdout, information
         assert not list(output.glob('*.json')), 'php-fpm -i must not capture an inherited trigger'
         for secret in ('', 'test-secret,other'):
@@ -528,7 +529,15 @@ if os.environ.get('FRANKENPHP'):
             [os.environ['FRANKENPHP'], 'php-server', '--listen', f'127.0.0.1:{port}', '--root', str(root)],
             cwd=root, stdout=subprocess.DEVNULL, stderr=errors,
             env=dict(environment, PHP_INI_SCAN_DIR=str(configuration), PHPRC=str(configuration)))
-        wait_until_ready(process, lambda: accepts(port), 'FrankenPHP')
+        try:
+            wait_until_ready(process, lambda: accepts(port), 'FrankenPHP')
+        except BaseException:
+            process.kill()
+            process.wait(timeout=10)
+            errors.seek(0)
+            print(errors.read().decode(errors='replace'), file=sys.stderr)
+            errors.close()
+            raise
         return process, port, errors
 
     def franken_request(port, token):
@@ -554,6 +563,7 @@ if os.environ.get('FRANKENPHP'):
                 errors.seek(0)
                 log = errors.read()
                 errors.close()
+                reject_sanitizer_diagnostics(log.decode(errors='replace'), 'FrankenPHP')
             reports = list(Path(directory).glob('*.json'))
             # A clean environment captures real headers only; an inherited variable refuses
             # every request and is reported once.
