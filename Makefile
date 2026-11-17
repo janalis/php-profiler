@@ -1,4 +1,4 @@
-.PHONY: help doctor fmt fmt-check check lint build test test-php test-matrix coverage mutation clean
+.PHONY: help doctor fmt fmt-check check lint build test test-php test-native-units test-matrix coverage mutation clean
 export PATH := $(CURDIR)/target/tools/bin:$(PATH)
 CLANG_FORMAT ?= $(if $(wildcard target/tools/venv/bin/clang-format),target/tools/venv/bin/clang-format,clang-format)
 PYTHON ?= $(if $(wildcard target/tools/venv/bin/python),target/tools/venv/bin/python,python3)
@@ -6,7 +6,7 @@ MAGO ?= $(if $(wildcard target/tools/bin/mago),target/tools/bin/mago,mago)
 PHP_FILES := $(shell find php tests -type f -name '*.php' -not -path '*/target/*')
 C_FILES := $(shell find crates tests -type f -not -path '*/target/*' \( -name '*.c' -o -name '*.h' \))
 help:
-	@echo 'bootstrap doctor fmt fmt-check lint build test test-php test-matrix coverage mutation check verify package package-install-smoke release-dry-run bench hooks clean'
+	@echo 'bootstrap doctor fmt fmt-check lint build test test-php test-native-units test-matrix coverage mutation check verify package package-install-smoke release-dry-run bench hooks clean'
 doctor:
 	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
 	rustc --version
@@ -36,6 +36,8 @@ test:
 	$(PYTHON) -m unittest discover -s tests/python
 test-php: build
 	scripts/php-tests.sh
+test-native-units:
+	scripts/native-unit-tests.sh
 test-matrix:
 	scripts/docker-matrix.sh
 coverage:
@@ -43,7 +45,7 @@ coverage:
 mutation:
 	$(PYTHON) scripts/rust-mutation.py --timeout 240 --jobs 2
 	scripts/c-mutation.sh
-check: fmt-check lint test test-php
+check: fmt-check lint test test-php test-native-units
 clean:
 	$(PYTHON) scripts/clean-builds.py
 
