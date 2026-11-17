@@ -32,6 +32,9 @@ def run_php(*args, **kwargs):
     return result
 
 
+INHERITED = b'HTTP_X_PHP_PROFILER_TRIGGER is set in the process environment'
+
+
 def free_port():
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
@@ -74,8 +77,8 @@ def built_in_server_checks(output):
     (output / 'server.php').write_text('<?php function leaf() {} leaf(); echo "ok";')
     for secret, cases, inherited in (
         (b'test-secret', [(None, False), (b'wrong', False), (b'test-secret,other', False), (b'test-secret', True)], None),
-        # Only a header equal to the inherited value is refused, and logged once per process.
-        (b'test-secret', [(b'test-secret', True), (b'leaked', False), (None, False), (b'leaked', False)], 'leaked'),
+        # The built-in server reads headers only: even an inherited copy of the secret is ignored.
+        (b'test-secret', [(None, False), (b'test-secret', True), (b'wrong', False)], 'test-secret'),
         # Latin-1 bytes are compared exactly, never through a lossy UTF-8 conversion.
         (b'caf\xe9', [(b'caf\xe9', True), ('caf\u00e9'.encode(), False)], None),
         # Unusable secrets are configuration errors, logged only when a capture is requested.
@@ -127,9 +130,8 @@ def built_in_server_checks(output):
         # One log line per requested capture with an unusable secret, none without a header.
         unusable = not secret or len(secret) > 4096 or b',' in secret or b'\0' in secret
         requested = sum(1 for token, captured in cases if token is not None)
-        shadowed = inherited is not None and inherited.encode() in [token for token, captured in cases]
-        expected = requested if unusable else int(shadowed)
-        assert log.count(b'automatic capture failed') == expected, (secret, log)
+        assert log.count(b'automatic capture failed') == (requested if unusable else 0), (secret, log)
+        assert INHERITED not in log, (secret, log)
     print('automatic built-in server trigger checks passed')
 
 
@@ -177,7 +179,7 @@ def inherited_environment_checks(output):
         try:
             result = run_php(['phpdbg', *settings, '-d', f'error_log={log}', '-qrr', str(script)], env=environment,
                              capture_output=True, check=True)
-            assert result.stdout.endswith(b'ok') and log.read_bytes().count(b'automatic capture failed') == 1, result
+            assert result.stdout.endswith(b'ok') and log.read_bytes().count(INHERITED) == 1, result
         finally:
             log.unlink(missing_ok=True)
         assert not list(output.glob('*.json')), 'phpdbg environment must not trigger a capture'
@@ -186,25 +188,24 @@ def inherited_environment_checks(output):
         print('automatic phpdbg environment check skipped: phpdbg unavailable')
     if shutil.which('php-cgi'):
         with FastCgi(settings, environment) as server:
-            # The fallback hands every request the inherited value; one log line per process.
-            for logged in (1, 0):
-                response = server.request_raw(str(script))
+            # The fallback is indistinguishable from a header, so every request is refused,
+            # including one with a real FastCGI parameter; one log line per process.
+            for logged, params in ((1, {}), (0, {}), (0, {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})):
+                response = server.request_raw(str(script), params)
                 assert response['body'] == b'ok', response
-                assert response['stderr'].count(b'automatic capture failed') == logged, response
+                assert response['stderr'].count(INHERITED) == logged, response
+                assert b'automatic capture failed' not in response['stderr'], response
                 assert b'X-Php-Profiler-Id' not in response['headers'], response
         assert not list(output.glob('*.json')), 'php-cgi environment fallback must not trigger a capture'
-        for inherited in (None, 'leaked'):
-            changed = dict(environment)
-            changed.pop('HTTP_X_PHP_PROFILER_TRIGGER')
-            if inherited:
-                changed['HTTP_X_PHP_PROFILER_TRIGGER'] = inherited
-            with FastCgi(settings, changed) as server:
-                response = server.request_raw(str(script), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
-                assert response['body'] == b'ok' and not response['stderr'], response
-                assert b'X-Php-Profiler-Id' in response['headers'], response
-            reports = list(output.glob('*.json'))
-            assert len(reports) == 1, 'a real FastCGI trigger header must still capture'
-            reports[0].unlink()
+        clean = dict(environment)
+        clean.pop('HTTP_X_PHP_PROFILER_TRIGGER')
+        with FastCgi(settings, clean) as server:
+            response = server.request_raw(str(script), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
+            assert response['body'] == b'ok' and not response['stderr'], response
+            assert b'X-Php-Profiler-Id' in response['headers'], response
+        reports = list(output.glob('*.json'))
+        assert len(reports) == 1, 'a real FastCGI trigger header must still capture'
+        reports[0].unlink()
         print('automatic php-cgi environment check passed')
     else:
         print('automatic php-cgi environment check skipped: php-cgi unavailable')
@@ -271,14 +272,18 @@ with tempfile.TemporaryDirectory() as directory:
         assert len(list(output.glob('*.json'))) == 2
         for path in output.glob('*.json'):
             path.unlink()
-        # FPM reads FastCGI parameters only: a variable in its startup environment never shadows them.
-        leaked = dict(php_environment, HTTP_X_PHP_PROFILER_TRIGGER='leaked')
-        with FpmServer(extension, settings, environment=leaked) as server:
-            response = server.request_raw(str(fixture), {'HTTP_X_PHP_PROFILER_TRIGGER': 'test-secret'})
-            assert response['body'] == b'ok' and not response['stderr'], response
-            assert b'X-Php-Profiler-Id' in response['headers'], response
-            log = Path(server.directory.name) / 'error.log'
-            assert b'automatic capture failed' not in (log.read_bytes() if log.exists() else b'')
+        # FPM reads FastCGI parameters only: its startup environment, even holding the secret
+        # itself, never shadows them. The worker writes error_log synchronously, before replying.
+        leaked = dict(php_environment, HTTP_X_PHP_PROFILER_TRIGGER='test-secret')
+        log = output / 'fpm-inherited.log'
+        with FpmServer(extension, dict(settings, error_log=str(log)), environment=leaked) as server:
+            for token, captured in ((None, False), ('test-secret', True)):
+                params = {} if token is None else {'HTTP_X_PHP_PROFILER_TRIGGER': token}
+                response = server.request_raw(str(fixture), params)
+                assert response['body'] == b'ok' and not response['stderr'], response
+                assert (b'X-Php-Profiler-Id' in response['headers']) == captured, response
+        assert not log.exists() or b'php_profiler' not in log.read_bytes(), log.read_bytes()
+        log.unlink(missing_ok=True)
         reports = list(output.glob('*.json'))
         assert len(reports) == 1, 'FPM must capture a real header despite an inherited variable'
         reports[0].unlink()

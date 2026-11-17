@@ -321,18 +321,29 @@ static int profiler_materialize_server(void) {
     zend_end_try();
     return success;
 }
-/* The value PHP inherited, copied once at module startup: before any ZTS request
- * thread can putenv() and rewrite environ, and for the life of the module. */
-static char *profiler_inherited_trigger;
+/* 0 when PHP started without HTTP_X_PHP_PROFILER_TRIGGER, 1 when it started with it and
+ * that is not yet reported, 2 once reported. Read at module startup, before any ZTS
+ * request thread can putenv() and rewrite environ. */
+static atomic_int profiler_inherited_trigger;
 void profiler_trigger_snapshot(void) {
-    const char *value = getenv("HTTP_X_PHP_PROFILER_TRIGGER");
-    profiler_inherited_trigger = value ? pestrdup(value, 1) : NULL;
+    atomic_store(&profiler_inherited_trigger, getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
 }
-/* SAPI-owned request values only. Returns -1 without a trigger header, -2 for the
- * inherited value, 0 for a header that does not match and 1 for a match. */
+/* php-cgi falls back to the process environment for missing FastCGI parameters, and
+ * phpdbg, embed and LiteSpeed CLI hosts import it into _SERVER. FPM, Apache and the
+ * built-in server read request headers only. A truncated name matches no entry. */
+static int profiler_environment_sapi(void) {
+    char name[64];
+    snprintf(name, sizeof(name), "|%s|", sapi_module.name);
+    return strstr("|cgi-fcgi|phpdbg|embed|litespeed|", name) != NULL;
+}
+/* SAPI-owned request values only. Returns -1 without a trigger header, -2 the first time
+ * and -3 afterwards when the process environment may shadow every request's header,
+ * 0 for a header that does not match and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     if (!strcmp(sapi_module.name, "cli"))
         return -1;
+    if (atomic_load(&profiler_inherited_trigger) && profiler_environment_sapi())
+        return atomic_exchange(&profiler_inherited_trigger, 2) == 1 ? -2 : -3;
     const char *value = NULL;
     if (sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
@@ -352,10 +363,6 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     }
     if (!value)
         return -1;
-    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the process
-     * environment. FPM, Apache and the built-in server pass the request's own header. */
-    if (profiler_inherited_trigger && !strcmp(value, profiler_inherited_trigger))
-        return -2;
     if (!length || length > 4096 || strnlen(value, 4097) != length || memchr(value, ',', length))
         return 0;
     volatile unsigned char difference = 0;
@@ -367,6 +374,14 @@ void profiler_auto_log(void) {
     zend_try {
         php_log_err(
             "php_profiler: automatic capture failed; check configuration and output directory");
+    }
+    zend_catch { profiler_defer_bailout(); }
+    zend_end_try();
+}
+void profiler_auto_log_inherited(void) {
+    zend_try {
+        php_log_err("php_profiler: HTTP_X_PHP_PROFILER_TRIGGER is set in the process "
+                    "environment, so trigger mode ignores every request in this process");
     }
     zend_catch { profiler_defer_bailout(); }
     zend_end_try();

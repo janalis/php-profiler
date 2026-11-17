@@ -1,14 +1,13 @@
 use super::*;
 use std::ffi::CString;
-use std::sync::atomic::AtomicBool;
 thread_local! { static SESSION: Cell<Option<i64>> = const { Cell::new(None) }; }
-static INHERITED_LOGGED: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
     fn profiler_config_unregister(number: i32);
     fn profiler_trigger_snapshot();
     fn profiler_trigger_matches(secret: *const u8, length: usize) -> i32;
     fn profiler_auto_log();
+    fn profiler_auto_log_inherited();
     fn getentropy(buffer: *mut std::ffi::c_void, length: usize) -> i32;
     #[cfg_attr(
         all(profiler_adapter_contract_tests, not(test)),
@@ -55,10 +54,12 @@ fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
                 // SAFETY: SAPI value is read synchronously, bounded and never retained.
                 match unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } {
                     // Without a trigger header nothing was requested, so nothing is logged.
-                    -1 => return Ok(()),
-                    // The inherited value shadows every request: report it once per process.
-                    -2 if INHERITED_LOGGED.swap(true, Ordering::Relaxed) => return Ok(()),
-                    -2 => return Err(()),
+                    // -3: the process environment shadows every header, as already reported.
+                    -1 | -3 => return Ok(()),
+                    -2 => {
+                        unsafe { profiler_auto_log_inherited() };
+                        return Ok(());
+                    }
                     // A secret no trigger header can ever match is a configuration error.
                     _ if secret.is_empty()
                         || secret.len() > 4096

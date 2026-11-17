@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Refuse every trigger header only under `php-cgi`, phpdbg, embed and LiteSpeed, which can read the process environment as a header, when PHP starts with `HTTP_X_PHP_PROFILER_TRIGGER` defined; php-fpm, Apache and the built-in server no longer compare request headers with the inherited value, so a real header equal to it captures and response timing reveals nothing about it. The refusal is logged once per process with a message naming the variable.
+
 ## [0.1.0-alpha.6] - 2026-11-17
 
 ### Commits

@@ -66,10 +66,7 @@ int automatic_test_register(const zend_ini_entry_def *entries, int number);
 #endif
 #include "../../crates/php-profiler/src/bridge.c"
 /* Module startup runs once; the unit test replays it as the environment changes. */
-static void automatic_snapshot(void) {
-    free(profiler_inherited_trigger);
-    profiler_trigger_snapshot();
-}
+static void automatic_snapshot(void) { profiler_trigger_snapshot(); }
 #undef php_log_err
 #undef sapi_header_op
 #undef zend_is_auto_global_str
@@ -431,19 +428,34 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 0) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 4097) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    /* A SAPI that reads request headers only ignores the process environment. */
     AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
     automatic_snapshot();
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -2);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    /* Environment-reading SAPIs refuse every request: reported once, then silently. */
+    static const char *const environment_sapis[] = {"cgi-fcgi", "phpdbg", "embed", "litespeed"};
+    for (size_t i = 0; i < sizeof(environment_sapis) / sizeof(*environment_sapis); i++) {
+        sapi_module.name = (char *)environment_sapis[i];
+        automatic_snapshot();
+        AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -2);
+        AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -3);
+    }
     /* Only the startup environment counts: later changes are never read. */
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -2);
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -3);
     automatic_snapshot();
     AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
-    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "other", 1) == 0);
+    /* Names are matched whole: a prefix, a suffix or an overlong name is no entry. */
+    static const char *const other_sapis[] = {
+        "cgi", "embedded", "fpm-fcgi", "apache2handler",
+        "cli-server-with-a-name-far-longer-than-any-environment-reading-sapi-name"};
     automatic_snapshot();
-    /* A header that differs from the inherited value is the request's own. */
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    for (size_t i = 0; i < sizeof(other_sapis) / sizeof(*other_sapis); i++) {
+        sapi_module.name = (char *)other_sapis[i];
+        AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    }
+    sapi_module.name = "contract-http";
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     automatic_snapshot();
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secrex", 6) == 0);
@@ -488,12 +500,12 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)maximum, 4096) == 1);
     add_assoc_string(&PG(http_globals)[TRACK_VARS_SERVER], "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
-    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "other", 1) == 0);
-    automatic_snapshot();
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
     AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
     automatic_snapshot();
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    sapi_module.name = "phpdbg";
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -2);
+    sapi_module.name = "contract-http";
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     automatic_snapshot();
     automatic_fault = 3;
