@@ -457,16 +457,17 @@ source and dependency hashes only and add no native mutation classification; the
 bridge unit test, the phpdbg and php-cgi environment checks and the built-in server
 NUL-secret case must kill the new mutants.
 
-### Review fixes: environment-reading SAPIs only
+### Review fixes: distrust every SAPI but header-only ones
 
 This renewal again edits `bridge.c` only after every recorded coordinate, so all audited
 spans are byte-identical. Module startup records whether PHP inherited
-`HTTP_X_PHP_PROFILER_TRIGGER`. Only the SAPIs that can read the process environment as a
-header (`cgi-fcgi`, `phpdbg`, `embed`, `litespeed`) consult that record; they refuse every
-trigger, returning -2 once and -3 afterwards so the adapter logs a dedicated message once
-per process. FPM, Apache and the built-in server never consult it. The SAPI names are
-matched by one delimited `strstr`, so the built-in server and phpdbg checks exercise the
-whole comparison. These changes renew the source and dependency hashes only and add no
-native mutation classification; the built-in server case with an inherited copy of the
-secret, the phpdbg and php-cgi environment checks and the bridge unit test must kill the
-new mutants.
+`HTTP_X_PHP_PROFILER_TRIGGER` under a SAPI that is not known to read request headers only
+(`fpm-fcgi`, `apache2handler`, `cli-server`, `litespeed`). The record fails closed: any other
+SAPI, including unknown ones, refuses every trigger and the bridge logs a dedicated message
+once per process through the same bailout-contained logger as the adapter's error message,
+returning -1 like a request without a trigger. LiteSpeed's command-line mode, which sets no
+request method, never reads a trigger. The SAPI names are matched by one delimited `strstr`,
+so the bridge unit test's header-only and near-miss names exercise the whole comparison.
+These changes renew the source and dependency hashes only and add no native mutation
+classification; the built-in server case with an inherited copy of the secret, the phpdbg
+and php-cgi environment checks and the bridge unit test must kill the new mutants.
