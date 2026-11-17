@@ -321,13 +321,21 @@ static int profiler_materialize_server(void) {
     zend_end_try();
     return success;
 }
+/* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the process
+ * environment: an inherited value is indistinguishable from a header. Read it once at
+ * module startup, before any ZTS request thread can putenv() and rewrite environ. */
+static int profiler_inherited_trigger;
+void profiler_trigger_snapshot(void) {
+    profiler_inherited_trigger = getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL;
+}
 /* SAPI-owned request values only. Returns -1 without a trusted trigger header,
- * 0 for a header that does not match and 1 for a match. */
+ * -2 when the startup environment defines one, 0 for a header that does not match
+ * and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
-    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the
-     * process environment: an inherited value is indistinguishable from a header. */
-    if (!strcmp(sapi_module.name, "cli") || getenv("HTTP_X_PHP_PROFILER_TRIGGER"))
+    if (!strcmp(sapi_module.name, "cli"))
         return -1;
+    if (profiler_inherited_trigger)
+        return -2;
     const char *value = NULL;
     if (sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",

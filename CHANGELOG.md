@@ -4,6 +4,11 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Log a configuration error instead of silently ignoring trigger requests while the process environment defines `HTTP_X_PHP_PROFILER_TRIGGER`, and read that environment once at startup instead of on every request, where thread-safe builds could race with `putenv()`.
+- Reject trigger secrets containing a NUL byte as a configuration error, since no header can match them.
+
 ## [0.1.0-alpha.4] - 2026-11-17
 
 ### Commits

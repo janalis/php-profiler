@@ -413,7 +413,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
-          components: rustfmt
+          # Match rust-toolchain.toml: adding clippy later to this toolchain intermittently
+          # failed with "detected conflict: 'bin/cargo-clippy'".
+          components: rustfmt, clippy
       - run: python3 scripts/bootstrap-tools.py
       - run: make fmt-check
 

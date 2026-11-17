@@ -4,6 +4,7 @@ thread_local! { static SESSION: Cell<Option<i64>> = const { Cell::new(None) }; }
 unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
     fn profiler_config_unregister(number: i32);
+    fn profiler_trigger_snapshot();
     fn profiler_trigger_matches(secret: *const u8, length: usize) -> i32;
     fn profiler_auto_log();
     fn getentropy(buffer: *mut std::ffi::c_void, length: usize) -> i32;
@@ -14,7 +15,10 @@ unsafe extern "C" {
     fn profiler_auto_header(value: *const std::ffi::c_char) -> i32;
 }
 pub fn register(number: i32) -> i32 {
-    unsafe { profiler_config_register(number) }
+    unsafe {
+        profiler_trigger_snapshot();
+        profiler_config_register(number)
+    }
 }
 pub fn unregister(number: i32) {
     unsafe { profiler_config_unregister(number) }
@@ -50,8 +54,14 @@ fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
                 match unsafe { profiler_trigger_matches(secret.as_ptr(), secret.len()) } {
                     // Without a trigger header nothing was requested, so nothing is logged.
                     -1 => return Ok(()),
+                    // The process environment would shadow every request's header.
+                    -2 => return Err(()),
                     // A secret no trigger header can ever match is a configuration error.
-                    _ if secret.is_empty() || secret.len() > 4096 || secret.contains(&b',') => {
+                    _ if secret.is_empty()
+                        || secret.len() > 4096
+                        || secret.contains(&b',')
+                        || secret.contains(&0) =>
+                    {
                         return Err(());
                     }
                     1 => {}
