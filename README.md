@@ -165,7 +165,8 @@ comma or a NUL byte is a configuration error, logged whenever a request carries 
 trigger header.
 Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
-trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`. A value inherited from the PHP
+trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; php-fpm, `php-cgi`, Apache and LiteSpeed
+answer it through their SAPI, every other SAPI (such as FrankenPHP) through `$_SERVER`. A value inherited from the PHP
 process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
 Unit and LiteSpeed (in server mode) read request headers only, so the process environment
 does not affect them while they serve requests; the CLI never reads a trigger, nor do these

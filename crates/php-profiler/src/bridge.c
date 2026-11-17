@@ -341,9 +341,19 @@ static void profiler_log(const char *message) {
  * HTTP_X_PHP_PROFILER_TRIGGER, 1 when a distrusted SAPI started with it and that is not
  * yet reported, 2 once reported. Read at module startup, before any ZTS request thread
  * can putenv() and rewrite environ. */
+/* SAPIs whose getenv answers HTTP_* from the request: FastCGI parameters, Apache's
+ * request table, LiteSpeed's headers. Elsewhere getenv may serve only the process
+ * environment (FrankenPHP), so the request's headers are read from _SERVER. */
+static int profiler_request_getenv_sapi(void) {
+    char name[64];
+    snprintf(name, sizeof(name), "|%s|", sapi_module.name);
+    return strstr("|fpm-fcgi|cgi-fcgi|apache2handler|litespeed|", name) != NULL;
+}
 static atomic_int profiler_inherited_trigger;
 static int profiler_trusted_sapi;
+static int profiler_request_getenv;
 void profiler_trigger_snapshot(void) {
+    profiler_request_getenv = profiler_request_getenv_sapi();
     profiler_trusted_sapi = profiler_header_sapi();
     atomic_store(&profiler_inherited_trigger,
                  !profiler_trusted_sapi && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
@@ -365,11 +375,12 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
         return -1;
     }
     const char *value = NULL;
-    if (sapi_module.getenv) {
+    if (profiler_request_getenv && sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
                                    sizeof("HTTP_X_PHP_PROFILER_TRIGGER") - 1);
     } else {
-        /* The built-in HTTP server exposes headers through _SERVER only.
+        /* The built-in HTTP server, NGINX Unit and FrankenPHP expose headers through
+         * _SERVER only.
          * Materialization is engine-owned, but may allocate: contain bailout. */
         if (!profiler_materialize_server())
             return -1;

@@ -480,3 +480,13 @@ such a SAPI without a request method returns -1 like the CLI, which generalizes 
 LiteSpeed command-line rule. The edit is again after every recorded coordinate and renews
 the source and dependency hashes only; the bridge unit test checks every header-only SAPI
 without a request method and phpdbg without one, and the FPM suite runs `php-fpm -i`.
+
+### Review fixes: headers from _SERVER unless getenv serves them
+
+FrankenPHP's getenv serves only the process environment, so trigger headers never reached
+the bridge there. Module startup now also records whether the SAPI's getenv answers
+`HTTP_*` from the request (`fpm-fcgi`, `cgi-fcgi`, `apache2handler`, `litespeed`); every
+other SAPI reads `_SERVER`, as the built-in server already did. The edit is again after every
+recorded coordinate and renews the source and dependency hashes only; the bridge unit test
+reads php-cgi through getenv and FrankenPHP through `_SERVER` with a differing getenv value,
+and the inherited variable differs from the header in the header-only SAPI checks.
