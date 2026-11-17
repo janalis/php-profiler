@@ -594,6 +594,7 @@ if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        process.console.close()
         # Apache writes its own log once configured, and startup errors to the console before that.
         server_log = b''.join(path.read_bytes() for path in (directory / 'console.log', directory / 'apache.log')
                               if path.exists())
@@ -602,6 +603,8 @@ if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
             failure.add_note((server_log + log).decode(errors='replace'))
         else:
             reject_sanitizer_diagnostics((server_log + log).decode(errors='replace'), 'Apache')
+            # A worker crash after its response only shows in Apache's log (AH00052).
+            assert b' exit signal ' not in server_log, server_log
         return log
 
     def apache(directory, environment):
@@ -621,7 +624,8 @@ if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
         (root / 'index.php').write_text('<?php echo "ok";')
         (root / 'marker.php').write_text("<?php error_log('apache-log-marker'); echo 'ok';")
         port = free_port()
-        modules = Path(os.environ['APACHE_PHP_MODULE']).parent
+        # Debian keeps Apache's modules beside libphp.so; elsewhere APACHE_MODULES names them.
+        modules = Path(os.environ.get('APACHE_MODULES') or Path(os.environ['APACHE_PHP_MODULE']).parent)
         # Running as root, Apache serves from an unprivileged user, as in production.
         user = 'User www-data\nGroup www-data\n' if os.geteuid() == 0 else ''
         (directory / 'httpd.conf').write_text(
@@ -632,10 +636,12 @@ if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
             f'LoadModule php_module {os.environ["APACHE_PHP_MODULE"]}\n{user}'
             f'DocumentRoot {root}\n<Directory {root}>\n  Require all granted\n</Directory>\n'
             'StartServers 2\n<FilesMatch "\\.php$">\n  SetHandler application/x-httpd-php\n</FilesMatch>\n')
+        console = (directory / 'console.log').open('wb')
         process = subprocess.Popen(
             [os.environ['APACHE'], '-f', str(directory / 'httpd.conf'), '-DFOREGROUND'],
-            stdout=(directory / 'console.log').open('wb'), stderr=subprocess.STDOUT,
+            stdout=console, stderr=subprocess.STDOUT,
             env=dict(environment, PHPRC=str(configuration), PHP_INI_SCAN_DIR=''))
+        process.console = console
         try:
             wait_until_ready(process, lambda: accepts(port), 'Apache')
         except BaseException as error:

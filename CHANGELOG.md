@@ -1,8 +1,13 @@
 # Changelog
 
-All notable changes are documented here using Semantic Versioning.
+All notable changes are documented here using Semantic Versioning. See the README and compatibility documentation for measurement and platform limitations.
 
 ## [Unreleased]
+
+### Fixed
+
+- List commits that announce a breaking change only in their body among a release's commits, and refuse to prepare a release whose notes would be empty, instead of merging the version bump and then failing to publish it.
+- Keep the changelog's closing note and fenced examples out of other versions' release notes.
 
 ## [0.1.0-alpha.9] - 2026-11-17
 
@@ -119,5 +124,3 @@ All notable changes are documented here using Semantic Versioning.
 - Keep private Zend helpers out of standalone Rust mutation test builds.
 - Renew the audited native mutation coordinates after formatting, preserving raw outcomes.
 - Update pinned GitHub Actions and release version tooling.
-
-See the README and compatibility documentation for measurement and platform limitations.

@@ -85,6 +85,21 @@ ledger.write_text(json.dumps({'schema_version': 2, 'contexts': {'nts': {}}, 'equ
     assert.equal((lock.match(/version = "0.1.0-alpha.1"/g) ?? []).length, 2);
     assert.match(readFileSync(join(cwd, 'CHANGELOG.md'), 'utf8'), /## \[0.1.0-alpha.1\] - \d{4}-\d{2}-\d{2}/);
     assert.throws(() => execFileSync('python3', ['scripts/prepare-release.py', '0.1.0-alpha.2'], {cwd, stdio: 'pipe'}));
+    git('add', '-A');
+    git('commit', '-m', 'chore(release): prepare 0.1.0-alpha.1');
+    git('tag', 'v0.1.0-alpha.1');
+    // release-plan.mjs releases for a breaking change named only in a commit body.
+    git('commit', '--allow-empty', '-m', 'refactor: drop the old API', '-m', 'BREAKING CHANGE: the old API is gone');
+    execFileSync('python3', ['scripts/prepare-release.py', '0.2.0-alpha.1'], {cwd, stdio: 'pipe'});
+    assert.match(readFileSync(join(cwd, 'CHANGELOG.md'), 'utf8'),
+      /## \[0.2.0-alpha.1\] - \d{4}-\d{2}-\d{2}\n\n### Commits\n\n- refactor: drop the old API\n/);
+    git('add', '-A');
+    git('commit', '-m', 'chore(release): prepare 0.2.0-alpha.1');
+    git('tag', 'v0.2.0-alpha.1');
+    // Nothing to list and an empty Unreleased section would publish empty notes: refuse before writing.
+    git('commit', '--allow-empty', '-m', 'chore: tidy');
+    assert.throws(() => execFileSync('python3', ['scripts/prepare-release.py', '0.2.0-alpha.2'], {cwd, stdio: 'pipe'}), /No release notes/);
+    assert.equal(git('status', '--porcelain'), '');
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -352,6 +367,9 @@ changelog = '''# Changelog
 notes = module.release_notes(changelog, '0.1.0-alpha.2')
 assert notes == '### Commits\\n\\n- fix: second (#2)\\n\\n### Fixed\\n\\n- Second.\\n', notes
 assert module.release_notes(changelog, '0.1.0-alpha.1') == '### Added\\n\\n- First.\\n'
+# A heading-like line inside a code fence belongs to the section.
+fenced = '## [0.1.0-alpha.3] - 2026-01-03\\n\\n- Example:\\n\\n\\x60\\x60\\x60md\\n## [x]\\n\\x60\\x60\\x60\\n\\n## [0.1.0-alpha.2] - 2026-01-02\\n\\n- Second.\\n'
+assert module.release_notes(fenced, '0.1.0-alpha.3') == '- Example:\\n\\n\\x60\\x60\\x60md\\n## [x]\\n\\x60\\x60\\x60\\n'
 for version in ('0.1.0-alpha.3', '0.1.0-alpha', 'Unreleased', '0.1.0-alpha.5'):
     try:
         module.release_notes(changelog, version)
