@@ -120,7 +120,7 @@ spec.loader.exec_module(module)
 version = '0.1.0-alpha.1'
 source = 'a' * 40
 refs = [{'ref': 'refs/tags/v' + version, 'object': {'sha': source, 'type': 'commit'}}]
-release = [{'tag_name': 'v' + version, 'assets': [{'name': 'source.tgz', 'browser_download_url': 'https://example.invalid/archive'}]}]
+release = [{'tag_name': 'v' + version, 'body': module.release_notes(Path('CHANGELOG.md').read_text(), version), 'assets': [{'name': 'source.tgz', 'browser_download_url': 'https://example.invalid/archive'}]}]
 packagist = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {'version': version, 'source': {'reference': source, 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
 def output(args, **kwargs):
     if args[:2] == ['git', 'rev-parse']:
@@ -309,6 +309,109 @@ with tempfile.TemporaryDirectory() as directory:
             raise AssertionError('main race accepted')
         assert not any(command[:2] == ['git', 'push'] for command in commands)
         assert original_output(['git', '--git-dir=' + str(remote), 'rev-parse', reference], text=True).strip() == source
+`;
+  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
+});
+
+test('release notes hold only the released version section', () => {
+  const script = `
+import importlib.util, json, sys, tempfile
+from pathlib import Path
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+changelog = '''# Changelog
+
+## [Unreleased]
+
+### Fixed
+
+- Pending.
+
+## [0.1.0-alpha.2] - 2026-01-02
+
+### Commits
+
+- fix: second (#2)
+
+### Fixed
+
+- Second.
+
+## [0.1.0-alpha.5]
+
+- Undated.
+
+## [0.1.0-alpha.1] - 2026-01-01
+
+### Added
+
+- First.
+'''
+notes = module.release_notes(changelog, '0.1.0-alpha.2')
+assert notes == '### Commits\\n\\n- fix: second (#2)\\n\\n### Fixed\\n\\n- Second.\\n', notes
+assert module.release_notes(changelog, '0.1.0-alpha.1') == '### Added\\n\\n- First.\\n'
+for version in ('0.1.0-alpha.3', '0.1.0-alpha', 'Unreleased', '0.1.0-alpha.5'):
+    try:
+        module.release_notes(changelog, version)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('missing section accepted: ' + version)
+try:
+    module.release_notes('## [0.1.0-alpha.4] - 2026-01-04\\n\\n## [0.1.0-alpha.3]\\n', '0.1.0-alpha.4')
+except ValueError:
+    pass
+else:
+    raise AssertionError('empty section accepted')
+
+# Every published body is the real CHANGELOG section: on creation, and repaired on retry.
+version = '0.1.0-alpha.1'
+source = 'a' * 40
+expected = module.release_notes(Path('CHANGELOG.md').read_text(), version)
+assert not any(line.startswith('## ') for line in expected.splitlines()) and 'Unreleased' not in expected
+refs = [{'ref': 'refs/tags/v' + version, 'object': {'sha': source, 'type': 'commit'}}]
+releases = []
+packagist = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {'version': version, 'source': {'reference': source, 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
+def output(args, **kwargs):
+    if args[:2] == ['git', 'rev-parse']:
+        return source
+    if args[:2] == ['git', 'cat-file']:
+        return 'commit'
+    if '/actions/runs/' in args[-1]:
+        return json.dumps({'name': 'quality', 'conclusion': 'success', 'head_sha': source, 'head_branch': 'main', 'head_repository': {'full_name': 'janalis/php-profiler'}, 'event': 'workflow_dispatch'})
+    if args[-1].endswith('/git/ref/heads/main'):
+        return json.dumps({'object': {'sha': source}})
+    if 'matching-refs' in args[-1]:
+        return json.dumps(refs)
+    if 'releases?' in args[-1]:
+        return json.dumps([releases])
+    raise AssertionError(args)
+def fetch(url):
+    return json.dumps(packagist).encode() if 'packagist' in url else b'archive'
+published = []
+def run(args, **kwargs):
+    if args[:3] in (['gh', 'release', 'create'], ['gh', 'release', 'edit']):
+        published.append((args[2], Path(args[args.index('--notes-file') + 1]).read_text()))
+    class Result:
+        returncode = 0
+    return Result()
+with tempfile.TemporaryDirectory() as directory:
+    archive = Path(directory) / 'source.tgz'
+    archive.write_bytes(b'archive')
+    with patch.object(sys, 'argv', ['finalize', version, str(archive), '--quality-run-id', '42']), patch.object(module.subprocess, 'check_output', side_effect=output), patch.object(module.subprocess, 'run', side_effect=run), patch.object(module, 'fetch', side_effect=fetch), patch.object(module, 'verify_checkout'):
+        module.main()
+        assert published == [('create', expected)], published
+        assets = [{'name': name, 'browser_download_url': 'https://example.invalid/' + name} for name in ('source.tgz', 'source.tgz.sha256')]
+        sha = (Path(directory) / 'source.tgz.sha256').read_bytes()
+        fetch_assets = lambda url: sha if url.endswith('.sha256') else fetch(url)
+        with patch.object(module, 'fetch', side_effect=fetch_assets):
+            for body, edits in ((Path('CHANGELOG.md').read_text(), [('edit', expected)]), (expected.replace('\\n', '\\r\\n'), [])):
+                published.clear()
+                releases[:] = [{'tag_name': 'v' + version, 'body': body, 'assets': assets}]
+                module.main()
+                assert published == edits, (published, edits)
 `;
   execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
 });

@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Publish only the released version's CHANGELOG section as its GitHub release notes, instead of the whole file, and repair the notes when finalization is retried.
+
 ## [0.1.0-alpha.8] - 2026-11-17
 
 ### Commits
@@ -103,9 +107,7 @@ All notable changes are documented here using Semantic Versioning.
 ### Fixed
 
 - Resume main quality validation after a release candidate merge and dispatch failure.
-
 - Assert frame completion before teardown so a broken close operation fails promptly.
-
 - Preserve same-line closure identity regression coverage through PHP formatting.
 - Isolate coverage profiles by executable and preserve strict LLVM diagnostics.
 - Keep private Zend helpers out of standalone Rust mutation test builds.
