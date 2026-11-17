@@ -17,6 +17,21 @@ def fetch(url):
         return response.read()
 
 
+def release_notes(changelog, version):
+    """Returns this version's CHANGELOG section, without its heading, as the release body."""
+    lines = changelog.splitlines()
+    # prepare-release.py dates every released heading; Unreleased never matches.
+    heading = re.compile(r"## \[" + re.escape(version) + r"\] - \d{4}-\d{2}-\d{2}")
+    start = next((index for index, line in enumerate(lines) if heading.fullmatch(line)), None)
+    if start is None:
+        raise ValueError(f"CHANGELOG.md has no {version} section")
+    end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith("## ")), len(lines))
+    notes = "\n".join(lines[start + 1:end]).strip()
+    if not notes:
+        raise ValueError(f"CHANGELOG.md has an empty {version} section")
+    return notes + "\n"
+
+
 def verify_packagist(payload, version, source):
     package_metadata = payload.get("package", {})
     if package_metadata.get("name") != "janalis/php-profiler":
@@ -147,6 +162,9 @@ def main():
     tag = "v" + args.version
     body = args.archive.read_bytes()
     verify_checkout(root, args.version, body)
+    # The release body is this version's section only, never the whole CHANGELOG.
+    # Read it before tagging, so a missing section stops the release unpublished.
+    release_body = release_notes((root / "CHANGELOG.md").read_text(), args.version)
     # Tags and release assets are immutable. Registry indexing can resume after publication.
     refs = json.loads(subprocess.check_output([
         "gh", "api", f"repos/{repo}/git/matching-refs/tags/{tag}"
@@ -155,6 +173,8 @@ def main():
     archive = args.archive.resolve()
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     checksum.write_text(hashlib.sha256(body).hexdigest() + "  " + archive.name + "\n")
+    notes = archive.with_name(archive.name + ".notes.md")
+    notes.write_text(release_body)
     releases = json.loads(subprocess.check_output(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"], text=True))
     release = next((item for page in releases for item in page if item["tag_name"] == tag), None)
     if release:
@@ -168,9 +188,12 @@ def main():
         missing = [str(path) for path in (archive, checksum) if path.name not in names]
         if missing:
             subprocess.run(["gh", "release", "upload", tag, "--repo", repo, *missing], check=True)
+        # Unlike assets, notes are editable: a retry repairs them instead of failing.
+        if (release.get("body") or "").replace("\r\n", "\n").strip() != release_body.strip():
+            subprocess.run(["gh", "release", "edit", tag, "--repo", repo, "--notes-file", str(notes)], check=True)
     else:
         subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--prerelease",
-                        "--title", tag, "--notes-file", str(root / "CHANGELOG.md"),
+                        "--title", tag, "--notes-file", str(notes),
                         str(archive), str(checksum)], check=True)
     verify_published_package(args.version, source)
     print(json.dumps({"version": args.version, "source": source, "sha256": hashlib.sha256(body).hexdigest(),
