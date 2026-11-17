@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9] - 2026-11-17
+
+### Commits
+
+- fix: publish only the released version's changelog section as release notes (#28)
+
 ### Fixed
 
 - Publish only the released version's CHANGELOG section as its GitHub release notes, instead of the whole file, and repair the notes when finalization is retried.
