@@ -324,7 +324,7 @@ static int profiler_materialize_server(void) {
 /* Only these SAPIs answer HTTP_* lookups from the request alone: FPM and NGINX Unit
  * ("cli-server") from request parameters, Apache from its request table, the built-in
  * server and LiteSpeed in server mode from headers. Every other SAPI may return the
- * process environment (php-cgi falls back to it, phpdbg and embed import it
+ * process environment (php-cgi falls back to it, phpdbg, embed and phpmicro import it
  * into _SERVER, FrankenPHP's getenv serves it), so it is distrusted. A truncated name
  * matches no entry. */
 static int profiler_header_sapi(void) {
@@ -332,10 +332,16 @@ static int profiler_header_sapi(void) {
     snprintf(name, sizeof(name), "|%s|", sapi_module.name);
     return strstr("|fpm-fcgi|apache2handler|cli-server|litespeed|", name) != NULL;
 }
-static void profiler_log(const char *message) {
-    zend_try { php_log_err((char *)message); }
+/* Returns 0 when logging bailed out; the bailout is deferred to the request. */
+static int profiler_log(const char *message) {
+    volatile int logged = 0;
+    zend_try {
+        php_log_err((char *)message);
+        logged = 1;
+    }
     zend_catch { profiler_defer_bailout(); }
     zend_end_try();
+    return logged;
 }
 /* 0 when the SAPI reads request headers only or PHP started without
  * HTTP_X_PHP_PROFILER_TRIGGER, 1 when a distrusted SAPI started with it and that is not
@@ -369,9 +375,11 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
         (profiler_trusted_sapi && !SG(request_info).request_method))
         return -1;
     if (atomic_load(&profiler_inherited_trigger)) {
-        if (atomic_exchange(&profiler_inherited_trigger, 2) == 1)
-            profiler_log("php_profiler: HTTP_X_PHP_PROFILER_TRIGGER is set in the process "
-                         "environment, so trigger mode ignores every request in this process");
+        /* A report that bailed out is retried by a later request. */
+        if (atomic_exchange(&profiler_inherited_trigger, 2) == 1 &&
+            !profiler_log("php_profiler: HTTP_X_PHP_PROFILER_TRIGGER is set in the process "
+                          "environment, so trigger mode ignores every request in this process"))
+            atomic_store(&profiler_inherited_trigger, 1);
         return -1;
     }
     const char *value = NULL;
@@ -402,7 +410,7 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     return difference == 0;
 }
 void profiler_auto_log(void) {
-    profiler_log(
+    (void)profiler_log(
         "php_profiler: automatic capture failed; check configuration and output directory");
 }
 int profiler_auto_header(const char *value) {

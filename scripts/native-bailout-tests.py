@@ -20,7 +20,7 @@ if sys.platform == 'darwin':
                     'tests/native/bailout-fault.c', '-o', str(helper)], check=True)
 outer_reports = tempfile.TemporaryDirectory(prefix='profiler-native-boundary-reports-')
 if os.environ.get('PROFILER_C_UNIT_BOUNDARIES') == '1':
-    for mode in ('materialize', 'trigger', 'log', 'header'):
+    for mode in ('materialize', 'trigger', 'log', 'inherited-log', 'header'):
         env = dict(os.environ, PROFILER_TEST_AUTOMATIC_BAILOUT=mode)
         from process_groups import ProcessGroups
         with ProcessGroups() as processes:

@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Report an inherited `HTTP_X_PHP_PROFILER_TRIGGER` again on a later request when writing that one-time log message bails out, instead of never reporting it in that process.
+- Capture trigger requests under FrankenPHP, whose `getenv` serves only the process environment: SAPIs other than php-fpm, `php-cgi`, Apache and LiteSpeed now read the trigger header from `$_SERVER`.
+- Ignore triggers when php-fpm, Apache, the built-in server, NGINX Unit or LiteSpeed run without a request method, as `php-fpm -i` does: FPM then reads the process environment, so an inherited `HTTP_X_PHP_PROFILER_TRIGGER` captured a profile.
+
 ## [0.1.0-alpha.7] - 2026-11-17
 
 ### Commits
@@ -12,8 +18,6 @@ All notable changes are documented here using Semantic Versioning.
 
 ### Fixed
 
-- Capture trigger requests under FrankenPHP, whose `getenv` serves only the process environment: SAPIs other than php-fpm, `php-cgi`, Apache and LiteSpeed now read the trigger header from `$_SERVER`.
-- Ignore triggers when php-fpm, Apache, the built-in server, NGINX Unit or LiteSpeed run without a request method, as `php-fpm -i` does: FPM then reads the process environment, so an inherited `HTTP_X_PHP_PROFILER_TRIGGER` captured a profile.
 - Accept trigger headers again when they equal an inherited `HTTP_X_PHP_PROFILER_TRIGGER` under php-fpm, Apache, the built-in server, NGINX Unit and LiteSpeed in server mode, which read request headers only: they no longer compare headers with the inherited value, so response timing reveals nothing about it. Every other SAPI (such as `php-cgi`, phpdbg, embed and FrankenPHP) refuses every trigger when PHP starts with that variable defined, and logs that once per process with a message naming it. LiteSpeed's command-line mode, like the CLI, never reads a trigger.
 
 ## [0.1.0-alpha.6] - 2026-11-17

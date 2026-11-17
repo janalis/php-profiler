@@ -172,7 +172,7 @@ Unit and LiteSpeed (in server mode) read request headers only, so the process en
 does not affect them while they serve requests; the CLI never reads a trigger, nor do these
 SAPIs outside a request (LiteSpeed's command-line mode, `php-fpm -i`). Every
 other SAPI may read the process environment as a header (`php-cgi` falls back to it for
-missing FastCGI parameters; phpdbg, embed and FrankenPHP expose it), so when the
+missing FastCGI parameters; phpdbg, embed, phpmicro and FrankenPHP expose it), so when the
 environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores
 every request under these SAPIs and logs that once per process. A variable a host sets after PHP starts is not detected.
 Classic CGI, where the web server passes headers through the environment, is not supported. Combined/comma-separated

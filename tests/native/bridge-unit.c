@@ -584,6 +584,20 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         automatic_fault = 1;
         profiler_auto_log();
         correct = profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "inherited-log") == 0) {
+        /* A report whose logging bailed out is made again by the next request, once. */
+        sapi_module.name = "phpdbg";
+        correct = setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0;
+        profiler_trigger_snapshot();
+        automatic_fault = 1;
+        correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
+        correct &= profiler_flags.pending_bailout;
+        profiler_flags.pending_bailout = false;
+        automatic_fault = 0;
+        int logs = automatic_test_logs;
+        correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
+        correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
+        correct &= automatic_test_logs == logs + 1 && !profiler_flags.pending_bailout;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");
