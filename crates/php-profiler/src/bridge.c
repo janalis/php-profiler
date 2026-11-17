@@ -321,21 +321,18 @@ static int profiler_materialize_server(void) {
     zend_end_try();
     return success;
 }
-/* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the process
- * environment: an inherited value is indistinguishable from a header. Read it once at
- * module startup, before any ZTS request thread can putenv() and rewrite environ. */
-static int profiler_inherited_trigger;
+/* The value PHP inherited, copied once at module startup: before any ZTS request
+ * thread can putenv() and rewrite environ, and for the life of the module. */
+static char *profiler_inherited_trigger;
 void profiler_trigger_snapshot(void) {
-    profiler_inherited_trigger = getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL;
+    const char *value = getenv("HTTP_X_PHP_PROFILER_TRIGGER");
+    profiler_inherited_trigger = value ? pestrdup(value, 1) : NULL;
 }
-/* SAPI-owned request values only. Returns -1 without a trusted trigger header,
- * -2 when the startup environment defines one, 0 for a header that does not match
- * and 1 for a match. */
+/* SAPI-owned request values only. Returns -1 without a trigger header, -2 for the
+ * inherited value, 0 for a header that does not match and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     if (!strcmp(sapi_module.name, "cli"))
         return -1;
-    if (profiler_inherited_trigger)
-        return -2;
     const char *value = NULL;
     if (sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
@@ -355,6 +352,10 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     }
     if (!value)
         return -1;
+    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the process
+     * environment. FPM, Apache and the built-in server pass the request's own header. */
+    if (profiler_inherited_trigger && !strcmp(value, profiler_inherited_trigger))
+        return -2;
     if (!length || length > 4096 || strnlen(value, 4097) != length || memchr(value, ',', length))
         return 0;
     volatile unsigned char difference = 0;
