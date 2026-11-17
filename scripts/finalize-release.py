@@ -25,7 +25,13 @@ def release_notes(changelog, version):
     start = next((index for index, line in enumerate(lines) if heading.fullmatch(line)), None)
     if start is None:
         raise ValueError(f"CHANGELOG.md has no {version} section")
-    end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith("## ")), len(lines))
+    end, fenced = len(lines), False
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("```"):
+            fenced = not fenced
+        elif not fenced and lines[index].startswith("## "):
+            end = index
+            break
     notes = "\n".join(lines[start + 1:end]).strip()
     if not notes:
         raise ValueError(f"CHANGELOG.md has an empty {version} section")
