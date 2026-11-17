@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.8] - 2026-11-17
+
+### Commits
+
+- fix: read FrankenPHP trigger headers and ignore triggers outside requests (#25)
+
 ### Fixed
 
 - Capture trigger requests under FrankenPHP outside worker mode, whose `getenv` serves only the process environment: SAPIs other than php-fpm, `php-cgi`, Apache and LiteSpeed now read the trigger header from `$_SERVER`.
