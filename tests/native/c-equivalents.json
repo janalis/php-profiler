@@ -325,7 +325,7 @@
     "scripts/native-bailout-tests.py": "0af48e07b5b4238d5898b45b3360c480693345819e8f3ca136204a16176487eb",
     "tests/native/automatic-transports.c": "66cc7af0e12e6a55f790ece293f6cbe0192f5856b87d084f6e130e948fec6605",
     "tests/native/bailout-fault.c": "cdd6287da2294ea6de2222d68a852579120290914689e39e8557294adb202e16",
-    "tests/native/bridge-unit.c": "971b3f6e479ac40c2ad2e30a40567b94b97927db3bad692e174d4b8fa519c39a",
+    "tests/native/bridge-unit.c": "a922819d8409b493029570e58b81772384f23d1122abaad77eba8d159d601ce6",
     "tests/native/c-boundaries.php": "f6d339e7a6d240a368ba3f471ed9faa892b17c5d7ae6703f216084ef5ef70ef5",
     "tests/native/frames-native.c": "9bd4b5ee9163bc3bb3ce41e9e9487b02f9737bb35734975b5eff9c2c971e3aff",
     "tests/native/sampling-lifecycle-native.c": "83acaf91b44d5e549b6f17fcd8ab40289bee30acef0f5b36dfe662ec7312d40a",

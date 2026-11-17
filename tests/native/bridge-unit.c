@@ -468,11 +468,11 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     /* Only the startup environment counts: later changes are never read. */
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    sapi_module.name = "cgi-fcgi";
     profiler_trigger_snapshot();
     AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
     SG(request_info).request_method = original_method;
-    sapi_module.name = "cgi-fcgi";
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     profiler_trigger_snapshot();
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secrex", 6) == 0);
