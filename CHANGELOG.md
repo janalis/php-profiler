@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-11-17
+
+### Commits
+
+- fix: never take automatic capture triggers from the process environment (#17)
+
 ### Fixed
 
 - Never take an automatic capture trigger from the PHP process environment (phpdbg, embed hosts and `php-cgi`'s environment fallback).
