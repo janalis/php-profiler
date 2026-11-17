@@ -4,6 +4,7 @@ thread_local! { static SESSION: Cell<Option<i64>> = const { Cell::new(None) }; }
 unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
     fn profiler_config_unregister(number: i32);
+    fn profiler_trigger_snapshot();
     fn profiler_trigger_matches(secret: *const u8, length: usize) -> i32;
     fn profiler_auto_log();
     fn getentropy(buffer: *mut std::ffi::c_void, length: usize) -> i32;
@@ -14,7 +15,10 @@ unsafe extern "C" {
     fn profiler_auto_header(value: *const std::ffi::c_char) -> i32;
 }
 pub fn register(number: i32) -> i32 {
-    unsafe { profiler_config_register(number) }
+    unsafe {
+        profiler_trigger_snapshot();
+        profiler_config_register(number)
+    }
 }
 pub fn unregister(number: i32) {
     unsafe { profiler_config_unregister(number) }

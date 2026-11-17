@@ -166,7 +166,7 @@ trigger header.
 Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`. A value inherited from the PHP
-process environment never triggers a capture: while the environment defines
+process environment never triggers a capture: when the environment PHP starts with defines
 `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores every request and logs a configuration
 error for each one outside the CLI. This covers the CLI, phpdbg,
 embed hosts and the environment fallback of `php-cgi`; classic CGI, where the web server

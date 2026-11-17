@@ -444,13 +444,14 @@ changes renew the source and dependency hashes only. They add no native mutation
 classification; the private transport contract and the built-in server, phpdbg and
 php-cgi integration checks must kill the new trigger mutants.
 
-### Review fixes: environment diagnostics and locking
+### Review fixes: environment diagnostics and startup snapshot
 
-This renewal edits `bridge.c` only from line 325 onward, after every recorded
-coordinate, so all audited spans are byte-identical. `profiler_trigger_matches` reads
-the process environment under `tsrm_env_lock()`, as PHP's own `getenv()` does, and
-returns -2 when the environment defines `HTTP_X_PHP_PROFILER_TRIGGER`; the Rust adapter
-logs that as a configuration error instead of treating it as a missing header. The
+This renewal edits `bridge.c` only from line 324 onward, after every recorded
+coordinate, so all audited spans are byte-identical. The process environment is read
+once by `profiler_trigger_snapshot()` during module startup, before a ZTS request thread
+can `putenv()`, instead of on every request. `profiler_trigger_matches` returns -2 when
+that startup environment defines `HTTP_X_PHP_PROFILER_TRIGGER`; the Rust adapter logs
+that as a configuration error instead of treating it as a missing header. The
 adapter also rejects trigger secrets containing a NUL byte. These changes renew the
 source and dependency hashes only and add no native mutation classification; the
 bridge unit test, the phpdbg and php-cgi environment checks and the built-in server
