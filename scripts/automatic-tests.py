@@ -582,3 +582,94 @@ if os.environ.get('FRANKENPHP'):
             assert len(reports) == expected.count(True), (inherited, reports)
             assert log.count(INHERITED) == (1 if inherited else 0), (inherited, log)
     print('automatic FrankenPHP trigger checks passed')
+
+# Apache's mod_php answers getenv from the request, so an inherited variable shadows nothing.
+# It needs an Apache built for this PHP, so this runs only where APACHE and APACHE_PHP_MODULE name one.
+if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
+    def stop_apache(process, directory, failure=None):
+        """Stops Apache and returns PHP's log; diagnostics never mask an earlier failure."""
+        process.send_signal(signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        # Apache writes its own log once configured, and startup errors to the console before that.
+        server_log = b''.join(path.read_bytes() for path in (directory / 'console.log', directory / 'apache.log')
+                              if path.exists())
+        log = (directory / 'php.log').read_bytes()
+        if failure is not None:
+            failure.add_note((server_log + log).decode(errors='replace'))
+        else:
+            reject_sanitizer_diagnostics((server_log + log).decode(errors='replace'), 'Apache')
+        return log
+
+    def apache(directory, environment):
+        directory.chmod(0o755)
+        output = directory / 'out'
+        root = directory / 'root'
+        configuration = directory / 'conf'
+        for path in (output, root, configuration):
+            path.mkdir()
+        output.chmod(0o777)
+        log = directory / 'php.log'
+        log.touch()
+        log.chmod(0o666)
+        (configuration / 'php.ini').write_text(
+            f'extension={extension}\nopcache.enable=0\nerror_log={log}\nphp_profiler.mode=trigger\n'
+            f'php_profiler.trigger_secret=apache-secret\nphp_profiler.output_dir={output}\n')
+        (root / 'index.php').write_text('<?php echo "ok";')
+        (root / 'marker.php').write_text("<?php error_log('apache-log-marker'); echo 'ok';")
+        port = free_port()
+        modules = Path(os.environ['APACHE_PHP_MODULE']).parent
+        # Running as root, Apache serves from an unprivileged user, as in production.
+        user = 'User www-data\nGroup www-data\n' if os.geteuid() == 0 else ''
+        (directory / 'httpd.conf').write_text(
+            f'ServerRoot {directory}\nServerName localhost\nListen 127.0.0.1:{port}\n'
+            f'PidFile {directory}/httpd.pid\nDefaultRuntimeDir {directory}\nErrorLog {directory}/apache.log\n'
+            f'LoadModule mpm_prefork_module {modules}/mod_mpm_prefork.so\n'
+            f'LoadModule authz_core_module {modules}/mod_authz_core.so\n'
+            f'LoadModule php_module {os.environ["APACHE_PHP_MODULE"]}\n{user}'
+            f'DocumentRoot {root}\n<Directory {root}>\n  Require all granted\n</Directory>\n'
+            'StartServers 2\n<FilesMatch "\\.php$">\n  SetHandler application/x-httpd-php\n</FilesMatch>\n')
+        process = subprocess.Popen(
+            [os.environ['APACHE'], '-f', str(directory / 'httpd.conf'), '-DFOREGROUND'],
+            stdout=(directory / 'console.log').open('wb'), stderr=subprocess.STDOUT,
+            env=dict(environment, PHPRC=str(configuration), PHP_INI_SCAN_DIR=''))
+        try:
+            wait_until_ready(process, lambda: accepts(port), 'Apache')
+        except BaseException as error:
+            stop_apache(process, directory, error)
+            raise
+        return process, port, output
+
+    def apache_request(port, page, token):
+        headers = {} if token is None else {'X-Php-Profiler-Trigger': token}
+        request = urllib.request.Request(f'http://127.0.0.1:{port}/{page}', headers=headers)
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.read() == b'ok'
+            return response.headers.get('X-Php-Profiler-Id')
+
+    for inherited in (None, 'apache-secret'):
+        environment = dict(php_environment)
+        environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
+        if inherited:
+            environment['HTTP_X_PHP_PROFILER_TRIGGER'] = inherited
+        with tempfile.TemporaryDirectory(prefix='profiler-apache-') as name:
+            directory = Path(name)
+            process, port, output = apache(directory, environment)
+            try:
+                captured = [apache_request(port, 'index.php', token) is not None
+                            for token in (None, 'wrong', 'apache-secret,other', 'apache-secret', None)]
+                # A marker proves the workers write this log, so the absence below is meaningful.
+                assert apache_request(port, 'marker.php', None) is None
+            except BaseException as error:
+                stop_apache(process, directory, error)
+                raise
+            log = stop_apache(process, directory)
+            # Apache reads request headers only: even an inherited copy of the secret neither
+            # captures a request without the header nor stops a real header from capturing.
+            assert captured == [False, False, False, True, False], (inherited, captured, log)
+            assert len(list(output.glob('*.json'))) == 1, (inherited, list(output.iterdir()))
+            assert b'apache-log-marker' in log and b'php_profiler' not in log, (inherited, log)
+    print('automatic Apache trigger checks passed')

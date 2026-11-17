@@ -65,13 +65,27 @@ run_fpm_suite() {
     --mode preload-jit --require-jit --workers 4 --expected-php "$version" --expected-zts nts | tee "$compatibility/${version}-${sapi}-closure-preload-jit-four-workers.json"
 }
 for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
-  for sapi in ${PHP_SAPIS:-cli zts fpm}; do
+  for sapi in ${PHP_SAPIS:-cli zts fpm apache frankenphp}; do
     image="${PROFILER_IMAGE_PREFIX:-local-php-profiler}:${version}-${sapi}"
-    docker build -f "$snapshot/tests/docker/Dockerfile" --build-arg "PHP_IMAGE=php:${version}-${sapi}-bookworm" -t "$image" "$snapshot"
+    php_image="php:${version}-${sapi}-bookworm"
+    # FrankenPHP's image builds PHP the official images' way, so extensions load as usual.
+    if [[ "$sapi" == frankenphp ]]; then php_image="dunglas/frankenphp:php${version}-bookworm"; fi
+    docker build -f "$snapshot/tests/docker/Dockerfile" --build-arg "PHP_IMAGE=$php_image" -t "$image" "$snapshot"
     expected_zts=nts
-    if [[ "$sapi" == zts ]]; then expected_zts=ts; fi
+    if [[ "$sapi" == zts || "$sapi" == frankenphp ]]; then expected_zts=ts; fi
     docker run --rm "$image" python3 scripts/php-environment-check.py --version "$version" --zts "$expected_zts" \
       | tee "$compatibility/${version}-${sapi}-runtime.json"
+    if [[ "$sapi" == apache || "$sapi" == frankenphp ]]; then
+      # The other cells cover the CLI; these check only how each server hands requests to PHP.
+      server=(-e APACHE=apache2 -e APACHE_PHP_MODULE=/usr/lib/apache2/modules/libphp.so)
+      label=Apache
+      if [[ "$sapi" == frankenphp ]]; then server=(-e FRANKENPHP=frankenphp); label=FrankenPHP; fi
+      docker run --rm "${server[@]}" "$image" python3 scripts/automatic-tests.py \
+        | tee "$compatibility/${version}-${sapi}-automatic.log"
+      grep -qx "automatic $label trigger checks passed" "$compatibility/${version}-${sapi}-automatic.log"
+      printf '%s %s\n' "$version" "$sapi" >> "$compatibility/cells-passed.txt"
+      continue
+    fi
     if [[ "${PROFILER_TEST_MODE:-full}" != overlay ]]; then
       docker run --rm "$image" python3 scripts/test-vendored-exception.py | tee "$compatibility/${version}-${sapi}-vendor-exception.log"
     fi
