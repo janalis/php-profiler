@@ -321,18 +321,46 @@ static int profiler_materialize_server(void) {
     zend_end_try();
     return success;
 }
-/* The value PHP inherited, copied once at module startup: before any ZTS request
- * thread can putenv() and rewrite environ, and for the life of the module. */
-static char *profiler_inherited_trigger;
-void profiler_trigger_snapshot(void) {
-    const char *value = getenv("HTTP_X_PHP_PROFILER_TRIGGER");
-    profiler_inherited_trigger = value ? pestrdup(value, 1) : NULL;
+/* Only these SAPIs answer HTTP_* lookups from the request alone: FPM and NGINX Unit
+ * ("cli-server") from request parameters, Apache from its request table, the built-in
+ * server and LiteSpeed in server mode from headers. Every other SAPI may return the
+ * process environment (php-cgi falls back to it, phpdbg and embed import it
+ * into _SERVER, FrankenPHP's getenv serves it), so it is distrusted. A truncated name
+ * matches no entry. */
+static int profiler_header_sapi(void) {
+    char name[64];
+    snprintf(name, sizeof(name), "|%s|", sapi_module.name);
+    return strstr("|fpm-fcgi|apache2handler|cli-server|litespeed|", name) != NULL;
 }
-/* SAPI-owned request values only. Returns -1 without a trigger header, -2 for the
- * inherited value, 0 for a header that does not match and 1 for a match. */
+static void profiler_log(const char *message) {
+    zend_try { php_log_err((char *)message); }
+    zend_catch { profiler_defer_bailout(); }
+    zend_end_try();
+}
+/* 0 when the SAPI reads request headers only or PHP started without
+ * HTTP_X_PHP_PROFILER_TRIGGER, 1 when a distrusted SAPI started with it and that is not
+ * yet reported, 2 once reported. Read at module startup, before any ZTS request thread
+ * can putenv() and rewrite environ. */
+static atomic_int profiler_inherited_trigger;
+void profiler_trigger_snapshot(void) {
+    atomic_store(&profiler_inherited_trigger,
+                 !profiler_header_sapi() && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
+}
+/* SAPI-owned request values only. Returns -1 when no trigger header was requested or
+ * the process environment may shadow every request's header (reported once), 0 for a
+ * header that does not match and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
-    if (!strcmp(sapi_module.name, "cli"))
+    /* The CLI, and LiteSpeed's command-line mode, which sets no request method,
+     * serve no request to trigger. */
+    if (!strcmp(sapi_module.name, "cli") ||
+        (!strcmp(sapi_module.name, "litespeed") && !SG(request_info).request_method))
         return -1;
+    if (atomic_load(&profiler_inherited_trigger)) {
+        if (atomic_exchange(&profiler_inherited_trigger, 2) == 1)
+            profiler_log("php_profiler: HTTP_X_PHP_PROFILER_TRIGGER is set in the process "
+                         "environment, so trigger mode ignores every request in this process");
+        return -1;
+    }
     const char *value = NULL;
     if (sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
@@ -352,10 +380,6 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     }
     if (!value)
         return -1;
-    /* php-cgi falls back to, and phpdbg and embed hosts fill _SERVER from, the process
-     * environment. FPM, Apache and the built-in server pass the request's own header. */
-    if (profiler_inherited_trigger && !strcmp(value, profiler_inherited_trigger))
-        return -2;
     if (!length || length > 4096 || strnlen(value, 4097) != length || memchr(value, ',', length))
         return 0;
     volatile unsigned char difference = 0;
@@ -364,12 +388,8 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
     return difference == 0;
 }
 void profiler_auto_log(void) {
-    zend_try {
-        php_log_err(
-            "php_profiler: automatic capture failed; check configuration and output directory");
-    }
-    zend_catch { profiler_defer_bailout(); }
-    zend_end_try();
+    profiler_log(
+        "php_profiler: automatic capture failed; check configuration and output directory");
 }
 int profiler_auto_header(const char *value) {
     if (!strcmp(sapi_module.name, "cli"))

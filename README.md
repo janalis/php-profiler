@@ -166,11 +166,12 @@ trigger header.
 Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`. A value inherited from the PHP
-process environment never triggers a capture. When the environment PHP starts with defines
-`HTTP_X_PHP_PROFILER_TRIGGER`, a request whose trigger value equals that inherited value is
-ignored, and the first such request in each process logs a configuration error. This covers
-phpdbg, embed hosts and the environment fallback of `php-cgi`; the CLI never reads a trigger.
-FPM, Apache and the built-in server pass the request's own header, so an inherited variable
-does not affect them. Classic CGI, where the web server passes headers through the
-environment, is not supported. Combined/comma-separated
+process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
+Unit and LiteSpeed (in server mode) read request headers only, so the process environment
+does not affect them; the CLI and LiteSpeed's command-line mode never read a trigger. Every
+other SAPI may read the process environment as a header (`php-cgi` falls back to it for
+missing FastCGI parameters; phpdbg, embed and FrankenPHP expose it), so when the
+environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores
+every request under these SAPIs and logs that once per process. A variable a host sets after PHP starts is not detected.
+Classic CGI, where the web server passes headers through the environment, is not supported. Combined/comma-separated
 trigger values are rejected.

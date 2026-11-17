@@ -22,7 +22,9 @@ zend_result __real_zend_register_ini_entries(const zend_ini_entry_def *entries, 
 #define real_register zend_register_ini_entries
 #endif
 
+int automatic_test_logs;
 void automatic_test_log(const char *message) {
+    automatic_test_logs++;
     if (automatic_test_fault() == 1)
         zend_bailout();
     php_log_err(message);
