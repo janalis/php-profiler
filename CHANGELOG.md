@@ -4,6 +4,11 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Capture trigger requests under FrankenPHP outside worker mode, whose `getenv` serves only the process environment: SAPIs other than php-fpm, `php-cgi`, Apache and LiteSpeed now read the trigger header from `$_SERVER`.
+- Ignore triggers when php-fpm, Apache, the built-in server, NGINX Unit or LiteSpeed run without a request method, as `php-fpm -i` does: FPM then reads the process environment, so an inherited `HTTP_X_PHP_PROFILER_TRIGGER` captured a profile.
+
 ## [0.1.0-alpha.7] - 2026-11-17
 
 ### Commits

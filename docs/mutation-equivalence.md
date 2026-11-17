@@ -471,3 +471,30 @@ so the bridge unit test's header-only and near-miss names exercise the whole com
 These changes renew the source and dependency hashes only and add no native mutation
 classification; the built-in server case with an inherited copy of the secret, the phpdbg
 and php-cgi environment checks and the bridge unit test must kill the new mutants.
+
+### Review fixes: no trigger outside a request
+
+`php-fpm -i` runs a request before any pool, while FPM's getenv still falls back to the
+process environment. Module startup now also records whether the SAPI is header-only, and
+such a SAPI without a request method returns -1 like the CLI, which generalizes the
+LiteSpeed command-line rule. The edit is again after every recorded coordinate and renews
+the source and dependency hashes only; the bridge unit test checks every header-only SAPI
+without a request method and phpdbg without one, and the FPM suite runs `php-fpm -i`.
+
+### Review fixes: headers from _SERVER unless getenv serves them
+
+FrankenPHP's getenv serves only the process environment, so trigger headers never reached
+the bridge there. Module startup now also records whether the SAPI's getenv answers
+`HTTP_*` from the request (`fpm-fcgi`, `cgi-fcgi`, `apache2handler`, `litespeed`); every
+other SAPI reads `_SERVER`, as the built-in server already did. The edit is again after every
+recorded coordinate and renews the source and dependency hashes only; the bridge unit test
+reads php-cgi through getenv and FrankenPHP through `_SERVER` with a differing getenv value,
+and the inherited variable differs from the header in the header-only SAPI checks.
+
+### Review fixes: one SAPI-name matcher, report once
+
+Both SAPI lists now go through one delimited `strstr` helper evaluated at module startup.
+The report of an inherited variable stays once per process even when logging bails out:
+retrying would abort every request while logging keeps failing. The edit is again after
+every recorded coordinate and renews the source and dependency hashes only; the isolated
+`inherited-log` bailout mode checks the deferred bailout and that no later request logs.

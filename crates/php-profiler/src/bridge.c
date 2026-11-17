@@ -321,52 +321,63 @@ static int profiler_materialize_server(void) {
     zend_end_try();
     return success;
 }
-/* Only these SAPIs answer HTTP_* lookups from the request alone: FPM and NGINX Unit
- * ("cli-server") from request parameters, Apache from its request table, the built-in
- * server and LiteSpeed in server mode from headers. Every other SAPI may return the
- * process environment (php-cgi falls back to it, phpdbg and embed import it
- * into _SERVER, FrankenPHP's getenv serves it), so it is distrusted. A truncated name
- * matches no entry. */
-static int profiler_header_sapi(void) {
+/* Whether the SAPI's name is one of the "|"-delimited names in `list`. A truncated
+ * name matches no entry. */
+static int profiler_sapi_in(const char *list) {
     char name[64];
     snprintf(name, sizeof(name), "|%s|", sapi_module.name);
-    return strstr("|fpm-fcgi|apache2handler|cli-server|litespeed|", name) != NULL;
+    return strstr(list, name) != NULL;
 }
 static void profiler_log(const char *message) {
     zend_try { php_log_err((char *)message); }
     zend_catch { profiler_defer_bailout(); }
     zend_end_try();
 }
-/* 0 when the SAPI reads request headers only or PHP started without
- * HTTP_X_PHP_PROFILER_TRIGGER, 1 when a distrusted SAPI started with it and that is not
- * yet reported, 2 once reported. Read at module startup, before any ZTS request thread
- * can putenv() and rewrite environ. */
+/* Whether the SAPI answers HTTP_* lookups from the request alone: FPM and NGINX Unit
+ * ("cli-server") from request parameters, Apache from its request table, the built-in
+ * server and LiteSpeed in server mode from headers. Every other SAPI may return the
+ * process environment (php-cgi falls back to it, phpdbg, embed and phpmicro import it
+ * into _SERVER, FrankenPHP's getenv serves it), so it is distrusted. */
+static int profiler_trusted_sapi;
+/* Whether the SAPI's getenv answers HTTP_* from the request: FastCGI parameters, Apache's
+ * request table, LiteSpeed's headers. Elsewhere getenv may serve only the process
+ * environment (FrankenPHP), so the request's headers are read from _SERVER. */
+static int profiler_request_getenv;
+/* 0 when the SAPI is trusted or PHP started without HTTP_X_PHP_PROFILER_TRIGGER, 1 when a
+ * distrusted SAPI started with it and that is not yet reported, 2 once reported. */
 static atomic_int profiler_inherited_trigger;
+/* Runs at module startup, before any ZTS request thread can putenv() and rewrite environ. */
 void profiler_trigger_snapshot(void) {
+    profiler_trusted_sapi = profiler_sapi_in("|fpm-fcgi|apache2handler|cli-server|litespeed|");
+    profiler_request_getenv = profiler_sapi_in("|fpm-fcgi|cgi-fcgi|apache2handler|litespeed|");
     atomic_store(&profiler_inherited_trigger,
-                 !profiler_header_sapi() && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
+                 !profiler_trusted_sapi && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
 }
 /* SAPI-owned request values only. Returns -1 when no trigger header was requested or
  * the process environment may shadow every request's header (reported once), 0 for a
  * header that does not match and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
-    /* The CLI, and LiteSpeed's command-line mode, which sets no request method,
-     * serve no request to trigger. */
+    /* The CLI serves no request to trigger. Neither does a header-only SAPI without a
+     * request method, such as LiteSpeed's command-line mode or `php-fpm -i`: before
+     * serving requests, both read the process environment instead of headers. */
     if (!strcmp(sapi_module.name, "cli") ||
-        (!strcmp(sapi_module.name, "litespeed") && !SG(request_info).request_method))
+        (profiler_trusted_sapi && !SG(request_info).request_method))
         return -1;
     if (atomic_load(&profiler_inherited_trigger)) {
+        /* Reported once, even when logging bails out: retrying would abort every
+         * request while logging keeps failing. */
         if (atomic_exchange(&profiler_inherited_trigger, 2) == 1)
             profiler_log("php_profiler: HTTP_X_PHP_PROFILER_TRIGGER is set in the process "
                          "environment, so trigger mode ignores every request in this process");
         return -1;
     }
     const char *value = NULL;
-    if (sapi_module.getenv) {
+    if (profiler_request_getenv && sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
                                    sizeof("HTTP_X_PHP_PROFILER_TRIGGER") - 1);
     } else {
-        /* The built-in HTTP server exposes headers through _SERVER only.
+        /* The built-in HTTP server, NGINX Unit and FrankenPHP expose headers through
+         * _SERVER only.
          * Materialization is engine-owned, but may allocate: contain bailout. */
         if (!profiler_materialize_server())
             return -1;

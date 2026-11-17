@@ -282,11 +282,26 @@ with tempfile.TemporaryDirectory() as directory:
                 response = server.request_raw(str(fixture), params)
                 assert response['body'] == b'ok' and not response['stderr'], response
                 assert (b'X-Php-Profiler-Id' in response['headers']) == captured, response
-        assert not log.exists() or b'php_profiler' not in log.read_bytes(), log.read_bytes()
-        log.unlink(missing_ok=True)
+            # A marker proves the worker writes this log, so the absence below is meaningful.
+            marker = output / 'fpm-log-marker.php'
+            marker.write_text("<?php error_log('fpm-log-marker'); echo 'ok';")
+            marker.chmod(0o644)
+            assert server.request_raw(str(marker))['body'] == b'ok'
+            marker.unlink()
+        assert b'fpm-log-marker' in log.read_bytes() and b'php_profiler' not in log.read_bytes(), log.read_bytes()
+        log.unlink()
         reports = list(output.glob('*.json'))
         assert len(reports) == 1, 'FPM must capture a real header despite an inherited variable'
         reports[0].unlink()
+        # `php-fpm -i` runs a request before any pool, so FPM's getenv still reads the
+        # process environment: that request has no method and must not capture.
+        information = subprocess.run(
+            [os.environ.get('PHP_FPM', 'php-fpm'), '-n', '-d', 'extension=' + extension,
+             *[f'-d{key}={value}' for key, value in settings.items()], '-i'],
+            env=leaked, capture_output=True, timeout=60)
+        reject_sanitizer_diagnostics(information.stderr.decode(errors='replace'), 'php-fpm -i')
+        assert information.returncode == 0 and b'php_profiler' in information.stdout, information
+        assert not list(output.glob('*.json')), 'php-fpm -i must not capture an inherited trigger'
         for secret in ('', 'test-secret,other'):
             settings['php_profiler.trigger_secret'] = secret
             with FpmServer(extension, settings) as server:
@@ -495,3 +510,75 @@ if sys.platform.startswith('linux'):
         assert result.stdout == b'ok' and b'automatic capture failed' in result.stderr
         assert not list(current.glob('*.json'))
     print('automatic native path admission boundary passed')
+
+# FrankenPHP's getenv serves only the process environment, so its headers come from _SERVER.
+# Its PHP build must match the extension's, so this runs only where FRANKENPHP names one.
+if os.environ.get('FRANKENPHP'):
+    def stop_frankenphp(process, errors, failure=None):
+        """Stops FrankenPHP and returns its log; diagnostics never mask an earlier failure."""
+        process.send_signal(signal.SIGINT)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        errors.seek(0)
+        log = errors.read()
+        errors.close()
+        if failure is not None:
+            failure.add_note(log.decode(errors='replace'))
+        else:
+            reject_sanitizer_diagnostics(log.decode(errors='replace'), 'FrankenPHP')
+        return log
+
+    def frankenphp(directory, environment):
+        configuration = Path(directory, 'conf')
+        root = Path(directory, 'root')
+        configuration.mkdir()
+        root.mkdir()
+        (configuration / 'profiler.ini').write_text(
+            f'extension={extension}\nphp_profiler.mode=trigger\n'
+            f'php_profiler.trigger_secret=franken-secret\nphp_profiler.output_dir={directory}\n')
+        (root / 'index.php').write_text('<?php echo "ok";')
+        port = free_port()
+        errors = tempfile.TemporaryFile()
+        process = subprocess.Popen(
+            [os.environ['FRANKENPHP'], 'php-server', '--listen', f'127.0.0.1:{port}', '--root', str(root)],
+            cwd=root, stdout=subprocess.DEVNULL, stderr=errors,
+            env=dict(environment, PHP_INI_SCAN_DIR=str(configuration), PHPRC=str(configuration)))
+        try:
+            wait_until_ready(process, lambda: accepts(port), 'FrankenPHP')
+        except BaseException as error:
+            stop_frankenphp(process, errors, error)
+            raise
+        return process, port, errors
+
+    def franken_request(port, token):
+        headers = {} if token is None else {'X-Php-Profiler-Trigger': token}
+        request = urllib.request.Request(f'http://127.0.0.1:{port}/', headers=headers)
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.read() == b'ok'
+            return response.headers.get('X-Php-Profiler-Id')
+
+    for inherited in (None, 'franken-secret'):
+        environment = dict(php_environment)
+        environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
+        if inherited:
+            environment['HTTP_X_PHP_PROFILER_TRIGGER'] = inherited
+        with tempfile.TemporaryDirectory(prefix='profiler-franken-') as directory:
+            process, port, errors = frankenphp(directory, environment)
+            try:
+                captured = [franken_request(port, token) is not None
+                            for token in (None, 'wrong', 'franken-secret', 'franken-secret')]
+            except BaseException as error:
+                stop_frankenphp(process, errors, error)
+                raise
+            log = stop_frankenphp(process, errors)
+            reports = list(Path(directory).glob('*.json'))
+            # A clean environment captures real headers only; an inherited variable refuses
+            # every request and is reported once.
+            expected = [False, False, False, False] if inherited else [False, False, True, True]
+            assert captured == expected, (inherited, captured, log)
+            assert len(reports) == expected.count(True), (inherited, reports)
+            assert log.count(INHERITED) == (1 if inherited else 0), (inherited, log)
+    print('automatic FrankenPHP trigger checks passed')

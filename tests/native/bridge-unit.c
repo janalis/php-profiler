@@ -66,8 +66,6 @@ int automatic_test_register(const zend_ini_entry_def *entries, int number);
 #define zend_register_ini_entries automatic_test_register
 #endif
 #include "../../crates/php-profiler/src/bridge.c"
-/* Module startup runs once; the unit test replays it as the environment changes. */
-static void automatic_snapshot(void) { profiler_trigger_snapshot(); }
 #undef php_log_err
 #undef sapi_header_op
 #undef zend_is_auto_global_str
@@ -420,32 +418,35 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 1);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     automatic_fault = 0;
-    sapi_module.name = "contract-http";
+    /* php-cgi's getenv answers HTTP_* from FastCGI parameters. */
+    sapi_module.name = "cgi-fcgi";
     sapi_module.getenv = automatic_test_getenv;
-    automatic_test_value = "secret";
+    profiler_trigger_snapshot();
     automatic_test_value = "";
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"", 0) == 0);
     automatic_test_value = "secret";
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 0) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 4097) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
-    /* SAPIs that read request headers only ignore the process environment. */
-    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
-    static const char *const header_sapis[] = {"fpm-fcgi", "apache2handler", "cli-server",
-                                               "litespeed"};
+    /* SAPIs that read request headers only ignore the process environment. Its value
+     * differs from the header, so reading the environment instead cannot match. */
+    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "inherited", 1) == 0);
+    static const char *const header_sapis[] = {"fpm-fcgi", "apache2handler", "litespeed"};
     static char request_method[] = "GET";
     char *original_method = SG(request_info).request_method;
     SG(request_info).request_method = request_method;
     for (size_t i = 0; i < sizeof(header_sapis) / sizeof(*header_sapis); i++) {
         sapi_module.name = (char *)header_sapis[i];
-        automatic_snapshot();
+        profiler_trigger_snapshot();
         AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+        /* Without a request method (LiteSpeed's command-line mode, `php-fpm -i`) they read
+         * the process environment, so like the CLI they serve no request to trigger. */
+        SG(request_info).request_method = NULL;
+        int logs = automatic_test_logs;
+        AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+        AUTOMATIC_ASSERT(automatic_test_logs == logs);
+        SG(request_info).request_method = request_method;
     }
-    /* LiteSpeed's command-line mode sets no request method and, like the CLI, serves no
-     * request to trigger. */
-    SG(request_info).request_method = NULL;
-    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
-    SG(request_info).request_method = request_method;
     /* Every other SAPI, known or not, may read the environment: it refuses every request,
      * reporting that once. Names are matched whole, so a prefix, a suffix or an overlong
      * name of a header-only SAPI is distrusted. */
@@ -457,7 +458,7 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
         "apache2",  "cli-server-with-a-name-far-longer-than-any-header-sapi-name"};
     for (size_t i = 0; i < sizeof(environment_sapis) / sizeof(*environment_sapis); i++) {
         sapi_module.name = (char *)environment_sapis[i];
-        automatic_snapshot();
+        profiler_trigger_snapshot();
         int logs = automatic_test_logs;
         AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
         AUTOMATIC_ASSERT(automatic_test_logs == logs + 1);
@@ -467,13 +468,14 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     /* Only the startup environment counts: later changes are never read. */
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
-    automatic_snapshot();
-    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
+    sapi_module.name = "cgi-fcgi";
+    profiler_trigger_snapshot();
+    /* A differing value: reading the environment instead of the request cannot match. */
+    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "inherited", 1) == 0);
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
     SG(request_info).request_method = original_method;
-    sapi_module.name = "contract-http";
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
-    automatic_snapshot();
+    profiler_trigger_snapshot();
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secrex", 6) == 0);
     char maximum[4097];
     memset(maximum, 'x', 4096);
@@ -519,17 +521,34 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     /* The built-in server reads _SERVER, which holds request headers only. */
     AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
     sapi_module.name = "cli-server";
-    automatic_snapshot();
+    profiler_trigger_snapshot();
+    SG(request_info).request_method = request_method;
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    SG(request_info).request_method = NULL;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    SG(request_info).request_method = original_method;
     /* phpdbg imports the environment into _SERVER. */
     sapi_module.name = "phpdbg";
-    automatic_snapshot();
+    profiler_trigger_snapshot();
+    /* Without a request method, a distrusted SAPI still refuses and reports. */
+    AUTOMATIC_ASSERT(SG(request_info).request_method == NULL);
     int logs = automatic_test_logs;
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
     AUTOMATIC_ASSERT(automatic_test_logs == logs + 1);
-    sapi_module.name = "contract-http";
     AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
-    automatic_snapshot();
+    /* FrankenPHP's getenv serves only the process environment: headers come from
+     * _SERVER, while php-cgi's getenv still answers them. */
+    sapi_module.name = "frankenphp";
+    sapi_module.getenv = automatic_test_getenv;
+    automatic_test_value = "environment";
+    profiler_trigger_snapshot();
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    sapi_module.name = "cgi-fcgi";
+    profiler_trigger_snapshot();
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    sapi_module.getenv = NULL;
+    sapi_module.name = "contract-http";
+    profiler_trigger_snapshot();
     automatic_fault = 3;
     AUTOMATIC_ASSERT(profiler_auto_header("X-Php-Profiler-Id: contract") == 0);
     automatic_fault = 0;
@@ -566,6 +585,26 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         automatic_fault = 1;
         profiler_auto_log();
         correct = profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "inherited-log") == 0) {
+        /* A report whose logging bailed out defers that bailout and is not retried:
+         * retrying would abort every request while logging keeps failing. */
+        sapi_module.name = "phpdbg";
+        correct = setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0;
+        profiler_trigger_snapshot();
+        automatic_fault = 1;
+        correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
+        correct &= profiler_flags.pending_bailout;
+        profiler_flags.pending_bailout = false;
+        automatic_fault = 0;
+        /* The process stays refused: a matching _SERVER value must still not capture. */
+        zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+        zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
+        if (Z_TYPE_P(server) != IS_ARRAY)
+            array_init(server);
+        add_assoc_string(server, "HTTP_X_PHP_PROFILER_TRIGGER", "secret");
+        int logs = automatic_test_logs;
+        correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
+        correct &= automatic_test_logs == logs && !profiler_flags.pending_bailout;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");
