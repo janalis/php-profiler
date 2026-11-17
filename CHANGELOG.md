@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] - 2026-11-17
+
+### Commits
+
+- fix: refuse only the inherited trigger value so FPM headers capture again (#21)
+
 ### Fixed
 
 - Accept trigger headers under php-fpm, Apache and the built-in server again when the process environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`: only a value equal to the inherited one is refused, and that misconfiguration is logged once per process instead of on every request.
