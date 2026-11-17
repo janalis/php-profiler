@@ -282,11 +282,25 @@ with tempfile.TemporaryDirectory() as directory:
                 response = server.request_raw(str(fixture), params)
                 assert response['body'] == b'ok' and not response['stderr'], response
                 assert (b'X-Php-Profiler-Id' in response['headers']) == captured, response
-        assert not log.exists() or b'php_profiler' not in log.read_bytes(), log.read_bytes()
-        log.unlink(missing_ok=True)
+            # A marker proves the worker writes this log, so the absence below is meaningful.
+            marker = output / 'fpm-log-marker.php'
+            marker.write_text("<?php error_log('fpm-log-marker'); echo 'ok';")
+            marker.chmod(0o644)
+            assert server.request_raw(str(marker))['body'] == b'ok'
+            marker.unlink()
+        assert b'fpm-log-marker' in log.read_bytes() and b'php_profiler' not in log.read_bytes(), log.read_bytes()
+        log.unlink()
         reports = list(output.glob('*.json'))
         assert len(reports) == 1, 'FPM must capture a real header despite an inherited variable'
         reports[0].unlink()
+        # `php-fpm -i` runs a request before any pool, so FPM's getenv still reads the
+        # process environment: that request has no method and must not capture.
+        information = subprocess.run(
+            [os.environ.get('PHP_FPM', 'php-fpm'), '-n', '-d', 'extension=' + extension,
+             *[f'-d{key}={value}' for key, value in settings.items()], '-i'],
+            env=leaked, capture_output=True, timeout=60)
+        assert information.returncode == 0 and b'php_profiler' in information.stdout, information
+        assert not list(output.glob('*.json')), 'php-fpm -i must not capture an inherited trigger'
         for secret in ('', 'test-secret,other'):
             settings['php_profiler.trigger_secret'] = secret
             with FpmServer(extension, settings) as server:

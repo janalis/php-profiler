@@ -342,18 +342,21 @@ static void profiler_log(const char *message) {
  * yet reported, 2 once reported. Read at module startup, before any ZTS request thread
  * can putenv() and rewrite environ. */
 static atomic_int profiler_inherited_trigger;
+static int profiler_trusted_sapi;
 void profiler_trigger_snapshot(void) {
+    profiler_trusted_sapi = profiler_header_sapi();
     atomic_store(&profiler_inherited_trigger,
-                 !profiler_header_sapi() && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
+                 !profiler_trusted_sapi && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
 }
 /* SAPI-owned request values only. Returns -1 when no trigger header was requested or
  * the process environment may shadow every request's header (reported once), 0 for a
  * header that does not match and 1 for a match. */
 int profiler_trigger_matches(const unsigned char *secret, size_t length) {
-    /* The CLI, and LiteSpeed's command-line mode, which sets no request method,
-     * serve no request to trigger. */
+    /* The CLI serves no request to trigger. Neither does a header-only SAPI without a
+     * request method, such as LiteSpeed's command-line mode or `php-fpm -i`: before
+     * serving requests, both read the process environment instead of headers. */
     if (!strcmp(sapi_module.name, "cli") ||
-        (!strcmp(sapi_module.name, "litespeed") && !SG(request_info).request_method))
+        (profiler_trusted_sapi && !SG(request_info).request_method))
         return -1;
     if (atomic_load(&profiler_inherited_trigger)) {
         if (atomic_exchange(&profiler_inherited_trigger, 2) == 1)

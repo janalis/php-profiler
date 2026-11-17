@@ -168,7 +168,8 @@ PHP code running in the same pool can read it with `ini_get()`. HTTP servers mus
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`. A value inherited from the PHP
 process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
 Unit and LiteSpeed (in server mode) read request headers only, so the process environment
-does not affect them; the CLI and LiteSpeed's command-line mode never read a trigger. Every
+does not affect them while they serve requests; the CLI never reads a trigger, nor do these
+SAPIs outside a request (LiteSpeed's command-line mode, `php-fpm -i`). Every
 other SAPI may read the process environment as a header (`php-cgi` falls back to it for
 missing FastCGI parameters; phpdbg, embed and FrankenPHP expose it), so when the
 environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores
