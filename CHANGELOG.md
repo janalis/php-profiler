@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] - 2026-11-17
+
+### Commits
+
+- fix: log trigger requests shadowed by the process environment (#19)
+
 ### Fixed
 
 - Log a configuration error instead of silently ignoring trigger requests while the process environment defines `HTTP_X_PHP_PROFILER_TRIGGER`, and read that environment once at startup instead of on every request, where thread-safe builds could race with `putenv()`.
