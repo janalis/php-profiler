@@ -197,6 +197,9 @@ struct State {
     generated_classes: GeneratedNames,
 }
 thread_local! { static FAILED: Cell<bool> = const {Cell::new(false)}; static STATE: RefCell<State> = RefCell::new(State::default()); }
+// Whether a profiler request is open on this thread: FrankenPHP's worker mode ends the PHP
+// request that ran its worker script after that script's requests already ended theirs.
+thread_local! { static REQUEST_OPEN: Cell<bool> = const { Cell::new(false) }; }
 fn budget_error(cause: BudgetError) -> PhpException {
     error(match cause {
         BudgetError::Limit => "Native profiler memory budget exhausted",
@@ -1255,6 +1258,28 @@ unsafe extern "C" fn startup(module_type: i32, module_number: i32) -> i32 {
     0
 }
 unsafe extern "C" fn request_startup(_: i32, _: i32) -> i32 {
+    begin_request();
+    0
+}
+unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
+    end_request();
+    0
+}
+/// FrankenPHP's worker mode serves each HTTP request inside the PHP request that runs the
+/// worker script and runs no extension's request hooks around it: the bridge calls this
+/// before each one, ending the worker script's start or nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn profiler_worker_request_begin() {
+    end_request();
+    begin_request();
+}
+/// Ends the worker request begun by `profiler_worker_request_begin`.
+#[unsafe(no_mangle)]
+pub extern "C" fn profiler_worker_request_end() {
+    end_request();
+}
+fn begin_request() {
+    REQUEST_OPEN.set(true);
     FAILED.set(false);
     unsafe {
         profiler_set_active(0);
@@ -1265,9 +1290,11 @@ unsafe extern "C" fn request_startup(_: i32, _: i32) -> i32 {
     sampling::reset_failure();
     STATE.with(|s| *s.borrow_mut() = State::default());
     automatic::start();
-    0
 }
-unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
+fn end_request() {
+    if !REQUEST_OPEN.replace(false) {
+        return;
+    }
     // Freeze every recording session before serializing the automatic report:
     // persistence work must not extend overlapping manual measurements.
     STATE.with(|s| {
@@ -1292,7 +1319,6 @@ unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
     STATE.with(|s| *s.borrow_mut() = State::default());
     // SAFETY: all request-owned identity records were discarded above.
     unsafe { profiler_set_context_tracking(0) };
-    0
 }
 unsafe extern "C" fn module_shutdown(_: i32, number: i32) -> i32 {
     automatic::unregister(number);

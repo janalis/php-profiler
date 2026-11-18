@@ -532,18 +532,21 @@ if os.environ.get('FRANKENPHP'):
             reject_sanitizer_diagnostics(log.decode(errors='replace'), 'FrankenPHP')
         return log
 
-    def frankenphp(directory, environment, configured=None):
-        """Serves root/ with php-server, or through a Caddyfile when `configured` names an env value."""
+    def frankenphp(directory, environment, configured=None, mode='trigger', worker=None):
+        """Serves root/ with php-server, or through a Caddyfile when `configured` names an env value.
+        A `worker` script serves every request from one worker thread."""
         configuration = Path(directory, 'conf')
         root = Path(directory, 'root')
         configuration.mkdir()
         root.mkdir()
         (configuration / 'profiler.ini').write_text(
-            f'extension={extension}\nphp_profiler.mode=trigger\n'
+            f'extension={extension}\nphp_profiler.mode={mode}\n'
             f'php_profiler.trigger_secret=franken-secret\nphp_profiler.output_dir={directory}\n')
-        (root / 'index.php').write_text('<?php echo "ok";')
+        (root / 'index.php').write_text(worker or '<?php echo "ok";')
         port = free_port()
         command = [os.environ['FRANKENPHP'], 'php-server', '--listen', f'127.0.0.1:{port}', '--root', str(root)]
+        if worker:
+            command += ['--worker', f'{root / "index.php"},1']
         if configured:
             caddyfile = Path(directory, 'Caddyfile')
             caddyfile.write_text(
@@ -563,12 +566,22 @@ if os.environ.get('FRANKENPHP'):
             raise
         return process, port, errors
 
-    def franken_request(port, token):
+    def franken_request(port, token, path='/'):
         headers = {} if token is None else {'X-Php-Profiler-Trigger': token}
-        request = urllib.request.Request(f'http://127.0.0.1:{port}/', headers=headers)
-        with urllib.request.urlopen(request, timeout=5) as response:
-            assert response.read() == b'ok'
-            return response.headers.get('X-Php-Profiler-Id')
+        request = urllib.request.Request(f'http://127.0.0.1:{port}{path}', headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                body = response.read()
+                # A worker reports its handler's uncaught exception in that response.
+                if path == '/throw':
+                    assert b'worker handler failure' in body, (token, body)
+                else:
+                    assert body == b'ok', (path, token, body)
+                return response.headers.get('X-Php-Profiler-Id')
+        except urllib.error.HTTPError as error:
+            # Only the throwing handler may fail, and its response still names the capture.
+            assert path == '/throw' and error.code == 500, (path, error.code)
+            return error.headers.get('X-Php-Profiler-Id')
 
     for inherited, configured in ((None, None), ('franken-secret', None), (None, 'franken-secret')):
         environment = dict(php_environment)
@@ -592,6 +605,53 @@ if os.environ.get('FRANKENPHP'):
             assert len(reports) == expected.count(True), (inherited, configured, reports)
             assert INHERITED not in log, (inherited, configured, log)
     print('automatic FrankenPHP trigger checks passed')
+
+    # Worker mode serves every request inside the PHP request running the worker script; each
+    # one is still its own profiler request, past the 16 sessions a request may hold.
+    WORKER = """<?php
+$handler = static function (): void {
+    if ($_SERVER['REQUEST_URI'] === '/throw') {
+        throw new RuntimeException('worker handler failure');
+    }
+    echo 'ok';
+};
+while (frankenphp_handle_request($handler)) {
+}
+"""
+
+    def franken_worker(mode, requests):
+        """Sends (token, path) requests to one worker thread; returns the response IDs, the
+        reports keyed by file name, and FrankenPHP's log."""
+        environment = dict(php_environment)
+        environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
+        with tempfile.TemporaryDirectory(prefix='profiler-franken-worker-') as directory:
+            process, port, errors = frankenphp(directory, environment, mode=mode, worker=WORKER)
+            try:
+                ids = [franken_request(port, token, path) for token, path in requests]
+            except BaseException as error:
+                stop_frankenphp(process, errors, error)
+                raise
+            log = stop_frankenphp(process, errors)
+            reports = {path.name: json.loads(path.read_text()) for path in Path(directory).glob('*.json')}
+        assert INHERITED not in log and b'automatic capture failed' not in log, log
+        assert all(report['termination_reason'] == 'request_complete' for report in reports.values()), reports
+        return ids, reports, log
+
+    secret = 'franken-secret'
+    requests = [(None, '/'), ('wrong', '/'), (secret, '/'), (secret, '/'), (None, '/')]
+    requests += [(secret, '/')] * 20 + [(secret, '/throw'), (secret, '/')]
+    ids, reports, log = franken_worker('trigger', requests)
+    expected = [False, False, True, True, False] + [True] * 22
+    assert [identifier is not None for identifier in ids] == expected, (ids, log)
+    captured = [identifier for identifier in ids if identifier is not None]
+    assert len(set(captured)) == len(captured), captured
+    assert set(reports) == {f'php-profile-{identifier}.json' for identifier in captured}, (sorted(reports), captured)
+    # In always mode the worker script's start, up to its first request, is captured as well.
+    ids, reports, log = franken_worker('always', [(None, '/')] * 5)
+    assert None not in ids and len(set(ids)) == 5, ids
+    assert len(reports) == 6 and {f'php-profile-{identifier}.json' for identifier in ids} < set(reports), (
+        ids, sorted(reports))
+    print('automatic FrankenPHP worker checks passed')
 
 # Apache's mod_php answers getenv from the request, so an inherited variable shadows nothing.
 # It needs an Apache built for this PHP, so this runs only where APACHE and APACHE_PHP_MODULE name one.

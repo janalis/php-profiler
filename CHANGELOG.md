@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+### Added
+
+- Capture each request a FrankenPHP worker serves through `frankenphp_handle_request()` as its own request, with its own `X-Php-Profiler-Id` header and report, instead of one session spanning the worker's life.
+
 ## [0.1.0-alpha.11] - 2026-11-18
 
 ### Commits

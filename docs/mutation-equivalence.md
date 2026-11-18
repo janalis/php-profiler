@@ -511,3 +511,26 @@ path. The edit is again after every recorded coordinate and renews the source an
 hashes only; the bridge unit test's stand-in header function (match, released result,
 non-canonical and longer names, joined values, a missing header, a non-string value, no array, no request method,
 phpdbg still refusing) and the isolated `headers` bailout mode must kill the new mutants.
+
+### FrankenPHP worker requests
+
+FrankenPHP's worker mode serves each HTTP request inside the PHP request that runs the worker
+script and runs request hooks for FrankenPHP's own modules only. Under the `frankenphp` SAPI,
+module startup now registers the internal `PhpProfiler\Internal\frankenphp_request()` callback
+and swaps `frankenphp_handle_request()`'s handler for one that hands FrankenPHP that callback,
+keeping the application's callback in a thread-local slot that nested calls save and restore.
+The callback begins a profiler request, calls the application's callback and ends the request,
+also before re-raising a bailout; module shutdown restores the handler. A callback name another
+extension already took leaves the handler alone without failing module startup. The unit test
+records worker boundaries through the private transports (`--wrap` on Linux), which then run the
+adapter's own, so production call sites keep their ordinary mutation inventory; both audited
+contexts list the two new `__wrap_profiler_worker_request_*` fixture symbols. A bailout is
+re-raised from the catch block itself, and the callback's name is interned, so no flag or
+release call exists for a mutant to drop unobserved. The Rust adapter's
+request hooks become `begin_request`/`end_request`, and ending a request that is not open does
+nothing. The bridge code is appended after every recorded coordinate and renews the source and
+dependency hashes only; the bridge unit test's stand-in `frankenphp_handle_request()` (call
+order, forwarded argument and result, exception, nested request, missing and non-callable
+arguments, direct call, other SAPI, taken callback name, missing function, restored handler), the isolated `worker` bailout mode, the
+adapter contract's worker requests past the session capacity, and the FrankenPHP worker
+integration checks must kill the new mutants.

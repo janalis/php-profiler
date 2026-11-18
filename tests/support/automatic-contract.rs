@@ -89,6 +89,23 @@ pub fn probe() {
     assert!(SESSION.get().is_some());
     finish();
     Profiler::reset_all();
+    // FrankenPHP worker requests are whole profiler requests: more of them than a request
+    // holds sessions all capture and persist, and the worker script's own request shutdown
+    // after its last worker request ends nothing.
+    let written = || std::fs::read_dir(&directory).unwrap().count();
+    let before = written();
+    // The worker script's start is captured until its first worker request begins.
+    start();
+    assert!(SESSION.get().is_some());
+    for _ in 0..SESSION_CAPACITY + 4 {
+        crate::profiler_worker_request_begin();
+        assert!(SESSION.get().is_some());
+        crate::profiler_worker_request_end();
+        assert!(SESSION.get().is_none());
+    }
+    assert_eq!(written(), before + 1 + SESSION_CAPACITY + 4);
+    crate::profiler_worker_request_end();
+    assert_eq!(written(), before + 1 + SESSION_CAPACITY + 4);
     set("mode", "off");
     for path in std::fs::read_dir(&directory).unwrap() {
         std::fs::remove_file(path.unwrap().path()).unwrap();
