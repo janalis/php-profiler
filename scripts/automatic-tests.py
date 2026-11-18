@@ -607,6 +607,24 @@ if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
             assert b' exit signal ' not in server_log, server_log
         return log
 
+    def apache_modules():
+        """Returns the directory holding Apache's own modules, which Homebrew and RHEL keep apart from libphp.so."""
+        if os.environ.get('APACHE_MODULES'):
+            return Path(os.environ['APACHE_MODULES'])
+        beside_php = Path(os.environ['APACHE_PHP_MODULE']).parent
+        if (beside_php / 'mod_mpm_prefork.so').exists():
+            return beside_php
+        # Homebrew and source builds install apxs beside httpd; RHEL puts it on PATH with httpd-devel.
+        beside_apache = Path(shutil.which(os.environ['APACHE']) or os.environ['APACHE']).parent / 'apxs'
+        apxs = os.environ.get('APXS') or (str(beside_apache) if beside_apache.exists() else shutil.which('apxs'))
+        if apxs:
+            modules = subprocess.run([apxs, '-q', 'LIBEXECDIR'], check=True, capture_output=True,
+                                     text=True).stdout.strip()
+            if (Path(modules) / 'mod_mpm_prefork.so').exists():
+                return Path(modules)
+        raise SystemExit('Apache modules not found beside APACHE_PHP_MODULE or through apxs; '
+                         'set APACHE_MODULES to the directory holding mod_mpm_prefork.so')
+
     def apache(directory, environment):
         directory.chmod(0o755)
         output = directory / 'out'
@@ -624,8 +642,7 @@ if os.environ.get('APACHE') and os.environ.get('APACHE_PHP_MODULE'):
         (root / 'index.php').write_text('<?php echo "ok";')
         (root / 'marker.php').write_text("<?php error_log('apache-log-marker'); echo 'ok';")
         port = free_port()
-        # Debian keeps Apache's modules beside libphp.so; elsewhere APACHE_MODULES names them.
-        modules = Path(os.environ.get('APACHE_MODULES') or Path(os.environ['APACHE_PHP_MODULE']).parent)
+        modules = apache_modules()
         # Running as root, Apache serves from an unprivileged user, as in production.
         user = 'User www-data\nGroup www-data\n' if os.geteuid() == 0 else ''
         (directory / 'httpd.conf').write_text(
