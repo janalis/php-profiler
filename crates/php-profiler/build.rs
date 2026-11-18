@@ -125,6 +125,8 @@ fn main() {
             println!("cargo:rustc-link-arg=-Wl,--wrap=sapi_header_op");
             println!("cargo:rustc-link-arg=-Wl,--wrap=zend_is_auto_global_str");
             println!("cargo:rustc-link-arg=-Wl,--wrap=zend_register_ini_entries");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=profiler_worker_request_begin");
+            println!("cargo:rustc-link-arg=-Wl,--wrap=profiler_worker_request_end");
         }
     } else {
         build.file("src/bridge.c");

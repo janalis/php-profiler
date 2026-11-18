@@ -83,6 +83,9 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
       docker run --rm "${server[@]}" "$image" python3 scripts/automatic-tests.py \
         | tee "$compatibility/${version}-${sapi}-automatic.log"
       grep -qx "automatic $label trigger checks passed" "$compatibility/${version}-${sapi}-automatic.log"
+      if [[ "$sapi" == frankenphp ]]; then
+        grep -qx "automatic FrankenPHP worker checks passed" "$compatibility/${version}-${sapi}-automatic.log"
+      fi
       printf '%s %s\n' "$version" "$sapi" >> "$compatibility/cells-passed.txt"
       continue
     fi

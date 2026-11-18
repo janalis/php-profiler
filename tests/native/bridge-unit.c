@@ -3,6 +3,7 @@
 #include <php.h>
 #include <Zend/zend_extensions.h>
 #include <Zend/zend_closures.h>
+#include <Zend/zend_exceptions.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <limits.h>
@@ -64,12 +65,22 @@ int automatic_test_register(const zend_ini_entry_def *entries, int number);
 #define sapi_header_op automatic_test_header
 #define zend_is_auto_global_str automatic_test_global
 #define zend_register_ini_entries automatic_test_register
+#define profiler_worker_request_begin automatic_test_worker_begin
+#define profiler_worker_request_end automatic_test_worker_end
 #endif
+/* The transports record worker request boundaries, then run the adapter's. */
+extern char automatic_worker_log[32];
+void automatic_worker_note(char event);
+void automatic_test_worker_begin(void);
+void automatic_test_worker_end(void);
 #include "../../crates/php-profiler/src/bridge.c"
 #undef php_log_err
 #undef sapi_header_op
 #undef zend_is_auto_global_str
 #undef zend_register_ini_entries
+#undef profiler_worker_request_begin
+#undef profiler_worker_request_end
+void profiler_worker_request_begin(void);
 #undef profiler_register
 #undef profiler_fiber_cleanup
 #undef profiler_fiber_destroy
@@ -428,6 +439,154 @@ ZEND_END_ARG_INFO()
 static const zend_function_entry automatic_test_header_functions[] = {
     ZEND_NAMED_FE(frankenphp_request_headers, ZEND_FN(automatic_test_request_headers),
                   arginfo_automatic_headers) ZEND_FE_END};
+/* A stand-in for FrankenPHP's frankenphp_handle_request(): calls its callback once with
+ * the argument 7 and returns what the callback returned. */
+static PHP_FUNCTION(automatic_test_handle_request) {
+    zend_fcall_info fci;
+    zend_fcall_info_cache fcc;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+    Z_PARAM_FUNC(fci, fcc)
+    ZEND_PARSE_PARAMETERS_END();
+    zval argument, result;
+    ZVAL_LONG(&argument, 7);
+    ZVAL_UNDEF(&result);
+    fci.retval = &result;
+    fci.params = &argument;
+    fci.param_count = 1;
+    if (zend_call_function(&fci, &fcc) == SUCCESS && !Z_ISUNDEF(result))
+        RETURN_COPY_VALUE(&result);
+    RETURN_FALSE;
+}
+/* The application's callback: returns six times its argument (mode 0), throws (1), serves
+ * a nested request (2) or bails out (3). */
+static int automatic_worker_mode;
+static PHP_FUNCTION(automatic_test_worker_handler) {
+    zval *arguments = NULL;
+    uint32_t count = 0;
+    ZEND_PARSE_PARAMETERS_START(0, -1)
+    Z_PARAM_VARIADIC('*', arguments, count)
+    ZEND_PARSE_PARAMETERS_END();
+    automatic_worker_note('h');
+    if (automatic_worker_mode == 1) {
+        zend_throw_exception(NULL, "worker handler failure", 0);
+        RETURN_THROWS();
+    }
+    if (automatic_worker_mode == 3)
+        zend_bailout();
+    if (automatic_worker_mode == 2) {
+        automatic_worker_mode = 0;
+        zval name, callback;
+        ZVAL_STRING(&name, "frankenphp_handle_request");
+        ZVAL_STRING(&callback, "automatic_test_worker_handler");
+        call_user_function(NULL, NULL, &name, return_value, 1, &callback);
+        zval_ptr_dtor(&name);
+        zval_ptr_dtor(&callback);
+        return;
+    }
+    RETURN_LONG(count == 1 && Z_TYPE(arguments[0]) == IS_LONG ? Z_LVAL(arguments[0]) * 6 : -1);
+}
+ZEND_BEGIN_ARG_INFO_EX(arginfo_automatic_handle_request, 0, 0, 1)
+ZEND_ARG_INFO(0, callback)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_INFO_EX(arginfo_automatic_worker_handler, 0, 0, 0)
+ZEND_ARG_VARIADIC_INFO(0, arguments)
+ZEND_END_ARG_INFO()
+static const zend_function_entry automatic_test_worker_functions[] = {
+    ZEND_NAMED_FE(frankenphp_handle_request, ZEND_FN(automatic_test_handle_request),
+                  arginfo_automatic_handle_request)
+        ZEND_FE(automatic_test_worker_handler, arginfo_automatic_worker_handler) ZEND_FE_END};
+/* Serves one worker request whose callback is `callback`; returns its result. */
+static zval automatic_worker_serve(const char *callback) {
+    zval name, argument, result;
+    ZVAL_STRING(&name, "frankenphp_handle_request");
+    ZVAL_STRING(&argument, callback);
+    ZVAL_UNDEF(&result);
+    automatic_worker_log[0] = 0;
+    call_user_function(NULL, NULL, &name, &result, 1, &argument);
+    zval_ptr_dtor(&name);
+    zval_ptr_dtor(&argument);
+    return result;
+}
+static bool automatic_worker_function_exists(const char *name) {
+    return zend_hash_str_find_ptr(CG(function_table), name, strlen(name)) != NULL;
+}
+static bool automatic_worker_contract(void) {
+    bool correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
+                                           MODULE_PERSISTENT) == SUCCESS;
+    zend_function *handle =
+        zend_hash_str_find_ptr(CG(function_table), ZEND_STRL("frankenphp_handle_request"));
+    correct &= handle != NULL;
+    if (!correct)
+        return false;
+    zif_handler original = handle->internal_function.handler;
+    /* Other SAPIs keep FrankenPHP's function as it is. */
+    sapi_module.name = "cli";
+    profiler_worker_register();
+    correct &= handle->internal_function.handler == original;
+    correct &= !automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
+    profiler_worker_unregister();
+    sapi_module.name = "frankenphp";
+    profiler_worker_register();
+    correct &= handle->internal_function.handler != original;
+    correct &= automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
+    /* The callback runs inside one profiler request and receives FrankenPHP's arguments. */
+    automatic_worker_mode = 0;
+    zval result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+    correct &= !strcmp(automatic_worker_log, "bhe") && profiler_worker_handler == NULL;
+    /* An exception still ends the request and reaches FrankenPHP. */
+    automatic_worker_mode = 1;
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= EG(exception) != NULL && !strcmp(automatic_worker_log, "bhe");
+    zend_clear_exception();
+    zval_ptr_dtor(&result);
+    /* A nested request runs inside the outer one's callback. */
+    automatic_worker_mode = 2;
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+    correct &= !strcmp(automatic_worker_log, "bhbhee") && profiler_worker_handler == NULL;
+    /* FrankenPHP rejects a missing or non-callable argument itself, before any request. */
+    zval handle_name;
+    ZVAL_STRING(&handle_name, "frankenphp_handle_request");
+    automatic_worker_log[0] = 0;
+    ZVAL_UNDEF(&result);
+    call_user_function(NULL, NULL, &handle_name, &result, 0, NULL);
+    correct &= EG(exception) != NULL && automatic_worker_log[0] == 0;
+    zend_clear_exception();
+    zval_ptr_dtor(&handle_name);
+    zval_ptr_dtor(&result);
+    result = automatic_worker_serve("automatic_test_missing_handler");
+    correct &= EG(exception) != NULL && automatic_worker_log[0] == 0;
+    zend_clear_exception();
+    zval_ptr_dtor(&result);
+    /* Called directly, the bridge's callback refuses to run. */
+    zval name, direct;
+    ZVAL_STRING(&name, "PhpProfiler\\Internal\\frankenphp_request");
+    ZVAL_UNDEF(&direct);
+    call_user_function(NULL, NULL, &name, &direct, 0, NULL);
+    correct &= EG(exception) != NULL && automatic_worker_log[0] == 0;
+    zend_clear_exception();
+    zval_ptr_dtor(&name);
+    zval_ptr_dtor(&direct);
+    profiler_worker_unregister();
+    correct &= handle->internal_function.handler == original;
+    correct &= !automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
+    /* A taken callback name fails module startup and leaves FrankenPHP's function alone. */
+    correct &= zend_register_functions(NULL, profiler_worker_functions, NULL, MODULE_PERSISTENT) ==
+               SUCCESS;
+    profiler_worker_register();
+    correct &= handle->internal_function.handler == original;
+    profiler_worker_unregister();
+    zend_unregister_functions(profiler_worker_functions, -1, NULL);
+    /* Without frankenphp_handle_request(), as under its CLI, nothing is installed. */
+    zend_unregister_functions(automatic_test_worker_functions, -1, NULL);
+    profiler_worker_register();
+    correct &= !automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
+    profiler_worker_unregister();
+    /* Reopen the CLI's own profiler request, which the worker requests above ended. */
+    profiler_worker_request_begin();
+    return correct;
+}
 static PHP_FUNCTION(profiler_test_automatic_transports) {
     (void)execute_data;
     zend_module_entry *module = zend_hash_str_find_ptr(&module_registry, ZEND_STRL("php_profiler"));
@@ -634,6 +793,7 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     automatic_fault = 0;
     zval_ptr_dtor(&PG(http_globals)[TRACK_VARS_SERVER]);
     PG(http_globals)[TRACK_VARS_SERVER] = saved;
+    AUTOMATIC_ASSERT(automatic_worker_contract());
     sapi_module.name = original_name;
     sapi_module.getenv = original_getenv;
     RETURN_TRUE;
@@ -697,6 +857,19 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         automatic_fault = 5;
         int status = profiler_trigger_matches((const unsigned char *)"secret", 6);
         correct &= status == -1 && profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "worker") == 0) {
+        /* A fatal error in the callback ends the worker request, then reaches FrankenPHP. */
+        correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
+                                          MODULE_PERSISTENT) == SUCCESS;
+        sapi_module.name = "frankenphp";
+        profiler_worker_register();
+        automatic_worker_mode = 3;
+        volatile bool bailed = false;
+        zend_try { automatic_worker_serve("automatic_test_worker_handler"); }
+        zend_catch { bailed = true; }
+        zend_end_try();
+        correct &=
+            bailed && !strcmp(automatic_worker_log, "bhe") && profiler_worker_handler == NULL;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");

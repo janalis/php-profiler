@@ -13,6 +13,12 @@ zend_result __real_zend_register_ini_entries(const zend_ini_entry_def *entries, 
 #define automatic_test_header __wrap_sapi_header_op
 #define automatic_test_global __wrap_zend_is_auto_global_str
 #define automatic_test_register __wrap_zend_register_ini_entries
+void __real_profiler_worker_request_begin(void);
+void __real_profiler_worker_request_end(void);
+#define automatic_test_worker_begin __wrap_profiler_worker_request_begin
+#define automatic_test_worker_end __wrap_profiler_worker_request_end
+#define real_worker_begin __real_profiler_worker_request_begin
+#define real_worker_end __real_profiler_worker_request_end
 #define real_header __real_sapi_header_op
 #define real_global __real_zend_is_auto_global_str
 #define real_register __real_zend_register_ini_entries
@@ -20,9 +26,31 @@ zend_result __real_zend_register_ini_entries(const zend_ini_entry_def *entries, 
 #define real_header sapi_header_op
 #define real_global zend_is_auto_global_str
 #define real_register zend_register_ini_entries
+void profiler_worker_request_begin(void);
+void profiler_worker_request_end(void);
+#define real_worker_begin profiler_worker_request_begin
+#define real_worker_end profiler_worker_request_end
 #endif
 
 int automatic_test_logs;
+/* FrankenPHP worker request boundaries, in call order, recorded before the adapter runs them. */
+char automatic_worker_log[32];
+void automatic_worker_note(char event) {
+    size_t length = strlen(automatic_worker_log);
+    if (length + 1 < sizeof(automatic_worker_log)) {
+        automatic_worker_log[length] = event;
+        automatic_worker_log[length + 1] = 0;
+    }
+}
+void automatic_test_worker_begin(void) {
+    automatic_worker_note('b');
+    real_worker_begin();
+}
+void automatic_test_worker_end(void) {
+    automatic_worker_note('e');
+    real_worker_end();
+}
+
 void automatic_test_log(const char *message) {
     automatic_test_logs++;
     if (automatic_test_fault() == 1)

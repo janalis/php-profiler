@@ -460,3 +460,97 @@ static ZEND_INI_DISP(profiler_secret_display) {
     (void)type;
     php_printf("%s", ZSTR_LEN(ini_entry->value) ? "********" : "no value");
 }
+/* FrankenPHP's worker mode serves each HTTP request inside the PHP request that runs the
+ * worker script: frankenphp_handle_request() runs request hooks for FrankenPHP's own modules
+ * only. The bridge therefore hands it a callback of its own, which begins a profiler request,
+ * calls the application's callback and ends that request, after FrankenPHP has started the
+ * HTTP request and before it sends the response's end. */
+extern void profiler_worker_request_begin(void);
+extern void profiler_worker_request_end(void);
+#define PROFILER_WORKER_CALLBACK "PhpProfiler\\Internal\\frankenphp_request"
+static zend_function *profiler_handle_request_function;
+static zif_handler profiler_handle_request_original;
+/* The application's callback for the innermost frankenphp_handle_request() call. */
+ZEND_TLS zval *profiler_worker_handler;
+static ZEND_FUNCTION(profiler_worker_callback) {
+    /* Every argument is variadic, so the frame holds them all in order. */
+    uint32_t count = ZEND_NUM_ARGS();
+    zval *arguments = ZEND_CALL_ARG(execute_data, 1);
+    zval *handler = profiler_worker_handler;
+    if (!handler) {
+        zend_throw_error(NULL, "%s() runs only as frankenphp_handle_request()'s callback",
+                         PROFILER_WORKER_CALLBACK);
+        return;
+    }
+    profiler_worker_request_begin();
+    zend_try { call_user_function(NULL, NULL, handler, return_value, count, arguments); }
+    zend_catch {
+        /* A fatal error still ends the request first, as PHP's request shutdown would. */
+        profiler_worker_request_end();
+        zend_bailout();
+    }
+    zend_end_try();
+    profiler_worker_request_end();
+}
+ZEND_BEGIN_ARG_INFO_EX(arginfo_profiler_worker_callback, 0, 0, 0)
+ZEND_ARG_VARIADIC_INFO(0, arguments)
+ZEND_END_ARG_INFO()
+static const zend_function_entry profiler_worker_functions[] = {
+    ZEND_NS_NAMED_FE("PhpProfiler\\Internal", frankenphp_request, ZEND_FN(profiler_worker_callback),
+                     arginfo_profiler_worker_callback) ZEND_FE_END};
+/* The callback's interned name, which FrankenPHP's frame may hold without owning it. */
+static zend_string *profiler_worker_callback_name;
+/* Hands the frame the application's callback back and restores the enclosing call's. */
+static void profiler_worker_restore(zval *argument, zval *handler, zval *previous) {
+    profiler_worker_handler = previous;
+    ZVAL_COPY_VALUE(argument, handler);
+}
+static ZEND_NAMED_FUNCTION(profiler_handle_request) {
+    /* FrankenPHP rejects any other call itself. */
+    bool wrap = ZEND_NUM_ARGS() == 1;
+    zval *argument = ZEND_CALL_ARG(execute_data, 1);
+    if (wrap)
+        wrap = zend_is_callable(argument, 0, NULL);
+    if (!wrap) {
+        profiler_handle_request_original(execute_data, return_value);
+        return;
+    }
+    zval handler;
+    ZVAL_COPY_VALUE(&handler, argument);
+    ZVAL_INTERNED_STR(argument, profiler_worker_callback_name);
+    zval *previous = profiler_worker_handler;
+    profiler_worker_handler = &handler;
+    zend_try { profiler_handle_request_original(execute_data, return_value); }
+    zend_catch {
+        profiler_worker_restore(argument, &handler, previous);
+        zend_bailout();
+    }
+    zend_end_try();
+    profiler_worker_restore(argument, &handler, previous);
+}
+/* Runs at module startup, like FrankenPHP's own getenv() override. A callback name another
+ * extension already took leaves worker requests uncaptured: Zend reports the duplicate. */
+void profiler_worker_register(void) {
+    profiler_handle_request_function = NULL;
+    if (!profiler_sapi_in("|frankenphp|"))
+        return;
+    zend_function *function =
+        zend_hash_str_find_ptr(CG(function_table), ZEND_STRL("frankenphp_handle_request"));
+    if (!function)
+        return;
+    if (zend_register_functions(NULL, profiler_worker_functions, NULL, MODULE_PERSISTENT) !=
+        SUCCESS)
+        return;
+    profiler_worker_callback_name = zend_string_init_interned(
+        PROFILER_WORKER_CALLBACK, sizeof(PROFILER_WORKER_CALLBACK) - 1, 1);
+    profiler_handle_request_function = function;
+    profiler_handle_request_original = function->internal_function.handler;
+    function->internal_function.handler = profiler_handle_request;
+}
+void profiler_worker_unregister(void) {
+    if (!profiler_handle_request_function)
+        return;
+    profiler_handle_request_function->internal_function.handler = profiler_handle_request_original;
+    profiler_handle_request_function = NULL;
+    zend_unregister_functions(profiler_worker_functions, -1, NULL);
+}

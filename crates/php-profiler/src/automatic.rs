@@ -5,6 +5,8 @@ unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
     fn profiler_config_unregister(number: i32);
     fn profiler_trigger_snapshot();
+    fn profiler_worker_register();
+    fn profiler_worker_unregister();
     fn profiler_trigger_matches(secret: *const u8, length: usize) -> i32;
     fn profiler_auto_log();
     fn getentropy(buffer: *mut std::ffi::c_void, length: usize) -> i32;
@@ -17,11 +19,15 @@ unsafe extern "C" {
 pub fn register(number: i32) -> i32 {
     unsafe {
         profiler_trigger_snapshot();
+        profiler_worker_register();
         profiler_config_register(number)
     }
 }
 pub fn unregister(number: i32) {
-    unsafe { profiler_config_unregister(number) }
+    unsafe {
+        profiler_worker_unregister();
+        profiler_config_unregister(number)
+    }
 }
 /// Exact INI bytes: a lossy conversion would silently change secrets and paths.
 fn setting(name: &str) -> Vec<u8> {

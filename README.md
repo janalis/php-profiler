@@ -166,8 +166,13 @@ trigger header.
 Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; php-fpm, `php-cgi`, Apache and LiteSpeed
-answer it through their SAPI, FrankenPHP 1.3+ through `frankenphp_request_headers()`, every other SAPI through `$_SERVER`. FrankenPHP's worker mode starts
-PHP's request lifecycle once per worker, so automatic capture does not run per request there. A value inherited from the PHP
+answer it through their SAPI, FrankenPHP 1.3+ through `frankenphp_request_headers()`, every other SAPI through `$_SERVER`. In FrankenPHP's worker
+mode, each request a worker serves through `frankenphp_handle_request()` is captured as its own request,
+with its own `X-Php-Profiler-Id` header and report: the extension calls the application's callback through
+its internal `PhpProfiler\Internal\frankenphp_request()` function, which appears in backtraces. In `always`
+mode, a worker's start, up to its first request, writes one report too. Sessions still running when a worker
+request ends are completed with it, as at the end of any request, and code a worker runs between requests is
+not captured. A value inherited from the PHP
 process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
 Unit, FrankenPHP 1.3+ and LiteSpeed (in server mode) read request headers only, so the process environment
 (or a FrankenPHP `env` setting) does not affect them while they serve requests; the CLI never reads a trigger, nor do these
