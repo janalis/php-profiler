@@ -615,26 +615,37 @@ $handler = static function (): void {
     }
     echo 'ok';
 };
+$between = false;
 while (frankenphp_handle_request($handler)) {
+    // A session started between requests ends before the worker waits for the next one.
+    if (!$between) {
+        PhpProfiler\Profiler::start(__DIR__ . '/between.json');
+        $between = true;
+    }
 }
 """
 
-    def franken_worker(mode, requests):
-        """Sends (token, path) requests to one worker thread; returns the response IDs, the
-        reports keyed by file name, and FrankenPHP's log."""
+    def franken_worker(mode, requests, delay=0):
+        """Sends (token, path) requests to one worker thread, the first after `delay` seconds;
+        returns the response IDs, the reports keyed by file name, the session started between
+        requests, and FrankenPHP's log."""
         environment = dict(php_environment)
         environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
         with tempfile.TemporaryDirectory(prefix='profiler-franken-worker-') as directory:
             process, port, errors = frankenphp(directory, environment, mode=mode, worker=WORKER)
             try:
+                time.sleep(delay)
                 ids = [franken_request(port, token, path) for token, path in requests]
             except BaseException as error:
                 stop_frankenphp(process, errors, error)
                 raise
             log = stop_frankenphp(process, errors)
             reports = {path.name: json.loads(path.read_text()) for path in Path(directory).glob('*.json')}
+            between = Path(directory, 'root', 'between.json')
+            between = json.loads(between.read_text()) if between.exists() else None
         assert INHERITED not in log and b'automatic capture failed' not in log, log
         assert all(report['termination_reason'] == 'request_complete' for report in reports.values()), reports
+        assert between is not None and between['termination_reason'] == 'request_shutdown', (between, log)
         return ids, reports, log
 
     secret = 'franken-secret'
@@ -647,10 +658,13 @@ while (frankenphp_handle_request($handler)) {
     assert len(set(captured)) == len(captured), captured
     assert set(reports) == {f'php-profile-{identifier}.json' for identifier in captured}, (sorted(reports), captured)
     # In always mode the worker script's start, up to its first request, is captured as well.
-    ids, reports, log = franken_worker('always', [(None, '/')] * 5)
+    # The start's report ends before the worker waits for its first request.
+    ids, reports, log = franken_worker('always', [(None, '/')] * 5, delay=1.5)
     assert None not in ids and len(set(ids)) == 5, ids
-    assert len(reports) == 6 and {f'php-profile-{identifier}.json' for identifier in ids} < set(reports), (
-        ids, sorted(reports))
+    served = {f'php-profile-{identifier}.json' for identifier in ids}
+    assert len(reports) == 6 and served < set(reports), (ids, sorted(reports))
+    start = next(report for name, report in reports.items() if name not in served)
+    assert start['elapsed_wall_ns'] < 1_000_000_000, start['elapsed_wall_ns']
     print('automatic FrankenPHP worker checks passed')
 
 # Apache's mod_php answers getenv from the request, so an inherited variable shadows nothing.

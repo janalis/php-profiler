@@ -534,3 +534,20 @@ order, forwarded argument and result, exception, nested request, missing and non
 arguments, direct call, other SAPI, taken callback name, missing function, restored handler), the isolated `worker` bailout mode, the
 adapter contract's worker requests past the session capacity, and the FrankenPHP worker
 integration checks must kill the new mutants.
+
+### Review fixes: FrankenPHP worker boundaries
+
+`frankenphp_handle_request()`'s handler now ends whatever profiler request is open before it calls
+FrankenPHP's own, so the worker script's start and any session started between requests end
+before the worker waits; the callback only begins and ends its request. The callback disarms the
+thread-local slot it reads, so a direct call from the application's callback is refused instead
+of restarting the request. A bailout while reading FrankenPHP's request headers marks the result
+undefined, so a half-built array is neither read nor released. The adapter's request end no longer
+needs an open-request flag: ending twice finds nothing to freeze or complete and stops an already
+stopped sampler. The edits are again after every recorded coordinate and renew the source and
+dependency hashes only; the bridge unit test's call logs, its direct-call mode, the released
+application callback, FrankenPHP returning or bailing out (isolated `worker-start` mode) without
+calling the callback with the slot emptied, the stand-in header
+function that bails out after filling the trigger header, and the FrankenPHP worker integration
+checks (a session started between requests, the start's wall time after an idle wait) must kill
+the new mutants.

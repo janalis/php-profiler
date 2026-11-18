@@ -91,13 +91,15 @@ pub fn probe() {
     Profiler::reset_all();
     // FrankenPHP worker requests are whole profiler requests: more of them than a request
     // holds sessions all capture and persist, and the worker script's own request shutdown
-    // after its last worker request ends nothing.
+    // after its last worker request ends nothing more.
     let written = || std::fs::read_dir(&directory).unwrap().count();
     let before = written();
     // The worker script's start is captured until its first worker request begins.
     start();
     assert!(SESSION.get().is_some());
     for _ in 0..SESSION_CAPACITY + 4 {
+        // FrankenPHP's handler ends what is open before waiting, then the callback begins.
+        crate::profiler_worker_request_end();
         crate::profiler_worker_request_begin();
         assert!(SESSION.get().is_some());
         crate::profiler_worker_request_end();
