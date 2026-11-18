@@ -166,14 +166,14 @@ trigger header.
 Keep its value out of public PHP configuration diagnostics;
 PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
 trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; php-fpm, `php-cgi`, Apache and LiteSpeed
-answer it through their SAPI, every other SAPI (such as FrankenPHP) through `$_SERVER`. FrankenPHP's worker mode starts
+answer it through their SAPI, FrankenPHP 1.3+ through `frankenphp_request_headers()`, every other SAPI through `$_SERVER`. FrankenPHP's worker mode starts
 PHP's request lifecycle once per worker, so automatic capture does not run per request there. A value inherited from the PHP
 process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
-Unit and LiteSpeed (in server mode) read request headers only, so the process environment
-does not affect them while they serve requests; the CLI never reads a trigger, nor do these
+Unit, FrankenPHP 1.3+ and LiteSpeed (in server mode) read request headers only, so the process environment
+(or a FrankenPHP `env` setting) does not affect them while they serve requests; the CLI never reads a trigger, nor do these
 SAPIs outside a request (LiteSpeed's command-line mode, `php-fpm -i`). Every
 other SAPI may read the process environment as a header (`php-cgi` falls back to it for
-missing FastCGI parameters; phpdbg, embed, phpmicro and FrankenPHP expose it), so when the
+missing FastCGI parameters; phpdbg, embed, phpmicro and FrankenPHP before 1.3 expose it), so when the
 environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores
 every request under these SAPIs and logs that once per process. A variable a host sets after PHP starts is not detected.
 Classic CGI, where the web server passes headers through the environment, is not supported. Combined/comma-separated

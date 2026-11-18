@@ -511,7 +511,8 @@ if sys.platform.startswith('linux'):
         assert not list(current.glob('*.json'))
     print('automatic native path admission boundary passed')
 
-# FrankenPHP's getenv serves only the process environment, so its headers come from _SERVER.
+# FrankenPHP's _SERVER starts from the process environment and ends with its configured env
+# values, so its headers come from frankenphp_request_headers().
 # Its PHP build must match the extension's, so this runs only where FRANKENPHP names one.
 if os.environ.get('FRANKENPHP'):
     def stop_frankenphp(process, errors, failure=None):
@@ -531,7 +532,8 @@ if os.environ.get('FRANKENPHP'):
             reject_sanitizer_diagnostics(log.decode(errors='replace'), 'FrankenPHP')
         return log
 
-    def frankenphp(directory, environment):
+    def frankenphp(directory, environment, configured=None):
+        """Serves root/ with php-server, or through a Caddyfile when `configured` names an env value."""
         configuration = Path(directory, 'conf')
         root = Path(directory, 'root')
         configuration.mkdir()
@@ -541,9 +543,17 @@ if os.environ.get('FRANKENPHP'):
             f'php_profiler.trigger_secret=franken-secret\nphp_profiler.output_dir={directory}\n')
         (root / 'index.php').write_text('<?php echo "ok";')
         port = free_port()
+        command = [os.environ['FRANKENPHP'], 'php-server', '--listen', f'127.0.0.1:{port}', '--root', str(root)]
+        if configured:
+            caddyfile = Path(directory, 'Caddyfile')
+            caddyfile.write_text(
+                '{\n\tadmin off\n\tauto_https off\n}\n'
+                f'http://127.0.0.1:{port} {{\n\troot * {root}\n'
+                f'\tphp_server {{\n\t\tenv HTTP_X_PHP_PROFILER_TRIGGER {configured}\n\t}}\n}}\n')
+            command = [os.environ['FRANKENPHP'], 'run', '--config', str(caddyfile), '--adapter', 'caddyfile']
         errors = tempfile.TemporaryFile()
         process = subprocess.Popen(
-            [os.environ['FRANKENPHP'], 'php-server', '--listen', f'127.0.0.1:{port}', '--root', str(root)],
+            command,
             cwd=root, stdout=subprocess.DEVNULL, stderr=errors,
             env=dict(environment, PHP_INI_SCAN_DIR=str(configuration), PHPRC=str(configuration)))
         try:
@@ -560,13 +570,13 @@ if os.environ.get('FRANKENPHP'):
             assert response.read() == b'ok'
             return response.headers.get('X-Php-Profiler-Id')
 
-    for inherited in (None, 'franken-secret'):
+    for inherited, configured in ((None, None), ('franken-secret', None), (None, 'franken-secret')):
         environment = dict(php_environment)
         environment.pop('HTTP_X_PHP_PROFILER_TRIGGER', None)
         if inherited:
             environment['HTTP_X_PHP_PROFILER_TRIGGER'] = inherited
         with tempfile.TemporaryDirectory(prefix='profiler-franken-') as directory:
-            process, port, errors = frankenphp(directory, environment)
+            process, port, errors = frankenphp(directory, environment, configured)
             try:
                 captured = [franken_request(port, token) is not None
                             for token in (None, 'wrong', 'franken-secret', 'franken-secret')]
@@ -575,12 +585,12 @@ if os.environ.get('FRANKENPHP'):
                 raise
             log = stop_frankenphp(process, errors)
             reports = list(Path(directory).glob('*.json'))
-            # A clean environment captures real headers only; an inherited variable refuses
-            # every request and is reported once.
-            expected = [False, False, False, False] if inherited else [False, False, True, True]
-            assert captured == expected, (inherited, captured, log)
-            assert len(reports) == expected.count(True), (inherited, reports)
-            assert log.count(INHERITED) == (1 if inherited else 0), (inherited, log)
+            # Only real headers capture: neither an inherited nor a configured env value
+            # stands in for a missing one, and neither is reported.
+            expected = [False, False, True, True]
+            assert captured == expected, (inherited, configured, captured, log)
+            assert len(reports) == expected.count(True), (inherited, configured, reports)
+            assert INHERITED not in log, (inherited, configured, log)
     print('automatic FrankenPHP trigger checks passed')
 
 # Apache's mod_php answers getenv from the request, so an inherited variable shadows nothing.

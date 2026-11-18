@@ -498,3 +498,16 @@ The report of an inherited variable stays once per process even when logging bai
 retrying would abort every request while logging keeps failing. The edit is again after
 every recorded coordinate and renews the source and dependency hashes only; the isolated
 `inherited-log` bailout mode checks the deferred bailout and that no later request logs.
+
+### Review fixes: FrankenPHP headers from the request alone
+
+FrankenPHP's `_SERVER` starts from the process environment and ends with its configured
+`env` values, so neither stands in for a missing header any more. Module startup looks up
+`frankenphp_request_headers()` (FrankenPHP 1.3+) under the `frankenphp` SAPI only. When it
+exists, FrankenPHP is header-only, and the bridge calls it under the same bailout containment
+as `_SERVER` materialization, looks the trigger up under Go's canonical header name and
+releases the returned array after the comparison. Without it, FrankenPHP keeps the distrusted `_SERVER`
+path. The edit is again after every recorded coordinate and renews the source and dependency
+hashes only; the bridge unit test's stand-in header function (match, released result,
+non-canonical and longer names, joined values, a missing header, a non-string value, no array, no request method,
+phpdbg still refusing) and the isolated `headers` bailout mode must kill the new mutants.
