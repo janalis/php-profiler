@@ -397,6 +397,37 @@ static char *automatic_test_getenv(const char *name, size_t length) {
     (void)length;
     return automatic_test_value;
 }
+/* A stand-in for FrankenPHP's frankenphp_request_headers(): an unrelated header, then
+ * automatic_test_value under automatic_test_header_name, as a string or (kind 1) an
+ * integer; kind 2 returns no array. */
+static const char *automatic_test_header_name = "X-Php-Profiler-Trigger";
+static int automatic_test_headers_kind;
+/* A reference the test keeps to the last returned array: the bridge must release its own. */
+static zval automatic_test_last_headers;
+static bool automatic_test_headers_released(void) {
+    return Z_TYPE(automatic_test_last_headers) == IS_ARRAY &&
+           Z_REFCOUNT(automatic_test_last_headers) == 1;
+}
+static PHP_FUNCTION(automatic_test_request_headers) {
+    (void)execute_data;
+    if (automatic_fault == 5)
+        zend_bailout();
+    if (automatic_test_headers_kind == 2)
+        RETURN_FALSE;
+    array_init(return_value);
+    add_assoc_string(return_value, "Accept", "*/*");
+    if (automatic_test_headers_kind == 1)
+        add_assoc_long(return_value, automatic_test_header_name, 42);
+    else if (automatic_test_value)
+        add_assoc_string(return_value, automatic_test_header_name, automatic_test_value);
+    zval_ptr_dtor(&automatic_test_last_headers);
+    ZVAL_COPY(&automatic_test_last_headers, return_value);
+}
+ZEND_BEGIN_ARG_INFO_EX(arginfo_automatic_headers, 0, 0, 0)
+ZEND_END_ARG_INFO()
+static const zend_function_entry automatic_test_header_functions[] = {
+    ZEND_NAMED_FE(frankenphp_request_headers, ZEND_FN(automatic_test_request_headers),
+                  arginfo_automatic_headers) ZEND_FE_END};
 static PHP_FUNCTION(profiler_test_automatic_transports) {
     (void)execute_data;
     zend_module_entry *module = zend_hash_str_find_ptr(&module_registry, ZEND_STRL("php_profiler"));
@@ -546,6 +577,55 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     sapi_module.name = "cgi-fcgi";
     profiler_trigger_snapshot();
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    /* FrankenPHP 1.3+ answers from frankenphp_request_headers(), the request's headers
+     * alone, so it is trusted: neither its getenv nor _SERVER, which both start from the
+     * process environment, is read, even when they hold the secret. */
+    AUTOMATIC_ASSERT(zend_register_functions(NULL, automatic_test_header_functions, NULL,
+                                             MODULE_PERSISTENT) == SUCCESS);
+    AUTOMATIC_ASSERT(setenv("HTTP_X_PHP_PROFILER_TRIGGER", "secret", 1) == 0);
+    sapi_module.name = "frankenphp";
+    profiler_trigger_snapshot();
+    SG(request_info).request_method = request_method;
+    logs = automatic_test_logs;
+    automatic_test_value = "secret";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 1);
+    AUTOMATIC_ASSERT(automatic_test_headers_released());
+    /* Go stores headers under their canonical names only: no other spelling is read. */
+    automatic_test_header_name = "x-php-profiler-trigger";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    automatic_test_header_name = "X-Php-Profiler-Trigger";
+    automatic_test_value = "secrex";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    /* Repeated headers arrive joined with ", ". */
+    automatic_test_value = "secret, secret";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
+    automatic_test_value = NULL;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    automatic_test_value = "secret";
+    automatic_test_header_name = "X-Php-Profiler-Triggers";
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    automatic_test_header_name = "X-Php-Profiler-Trigger";
+    automatic_test_headers_kind = 1;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    AUTOMATIC_ASSERT(automatic_test_headers_released());
+    automatic_test_headers_kind = 2;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    automatic_test_headers_kind = 0;
+    /* Outside a request, such as a worker script's start, no header is read. */
+    SG(request_info).request_method = NULL;
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    SG(request_info).request_method = request_method;
+    AUTOMATIC_ASSERT(automatic_test_logs == logs);
+    /* The function trusts FrankenPHP alone: phpdbg still refuses an inherited value. */
+    sapi_module.name = "phpdbg";
+    profiler_trigger_snapshot();
+    AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == -1);
+    AUTOMATIC_ASSERT(automatic_test_logs == logs + 1);
+    SG(request_info).request_method = original_method;
+    AUTOMATIC_ASSERT(unsetenv("HTTP_X_PHP_PROFILER_TRIGGER") == 0);
+    zend_unregister_functions(automatic_test_header_functions, -1, NULL);
+    zval_ptr_dtor(&automatic_test_last_headers);
+    ZVAL_UNDEF(&automatic_test_last_headers);
     sapi_module.getenv = NULL;
     sapi_module.name = "contract-http";
     profiler_trigger_snapshot();
@@ -605,6 +685,18 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         int logs = automatic_test_logs;
         correct &= profiler_trigger_matches((const unsigned char *)"secret", 6) == -1;
         correct &= automatic_test_logs == logs && !profiler_flags.pending_bailout;
+    } else if (mode && strcmp(mode, "headers") == 0) {
+        /* FrankenPHP's header function may allocate: its bailout is deferred. */
+        static char request_method[] = "GET";
+        correct = zend_register_functions(NULL, automatic_test_header_functions, NULL,
+                                          MODULE_PERSISTENT) == SUCCESS;
+        sapi_module.name = "frankenphp";
+        profiler_trigger_snapshot();
+        SG(request_info).request_method = request_method;
+        automatic_test_value = "secret";
+        automatic_fault = 5;
+        int status = profiler_trigger_matches((const unsigned char *)"secret", 6);
+        correct &= status == -1 && profiler_flags.pending_bailout;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");

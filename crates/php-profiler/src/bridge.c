@@ -328,6 +328,18 @@ static int profiler_sapi_in(const char *list) {
     snprintf(name, sizeof(name), "|%s|", sapi_module.name);
     return strstr(list, name) != NULL;
 }
+/* FrankenPHP 1.3+'s frankenphp_request_headers(), which reads the request's headers alone;
+ * NULL under every other SAPI. */
+static zend_function *profiler_request_headers;
+/* Calls frankenphp_request_headers() into `headers`, which the caller releases. The call
+ * may allocate: contain bailout. */
+static void profiler_read_request_headers(zval *headers) {
+    zend_try {
+        zend_call_known_function(profiler_request_headers, NULL, NULL, headers, 0, NULL, NULL);
+    }
+    zend_catch { profiler_defer_bailout(); }
+    zend_end_try();
+}
 static void profiler_log(const char *message) {
     zend_try { php_log_err((char *)message); }
     zend_catch { profiler_defer_bailout(); }
@@ -335,9 +347,10 @@ static void profiler_log(const char *message) {
 }
 /* Whether the SAPI answers HTTP_* lookups from the request alone: FPM and NGINX Unit
  * ("cli-server") from request parameters, Apache from its request table, the built-in
- * server and LiteSpeed in server mode from headers. Every other SAPI may return the
- * process environment (php-cgi falls back to it, phpdbg, embed and phpmicro import it
- * into _SERVER, FrankenPHP's getenv serves it), so it is distrusted. */
+ * server and LiteSpeed in server mode from headers, FrankenPHP from
+ * frankenphp_request_headers(). Every other SAPI may return the process environment
+ * (php-cgi falls back to it, phpdbg, embed and phpmicro import it into _SERVER, as does
+ * FrankenPHP before 1.3, whose getenv also serves it), so it is distrusted. */
 static int profiler_trusted_sapi;
 /* Whether the SAPI's getenv answers HTTP_* from the request: FastCGI parameters, Apache's
  * request table, LiteSpeed's headers. Elsewhere getenv may serve only the process
@@ -348,7 +361,14 @@ static int profiler_request_getenv;
 static atomic_int profiler_inherited_trigger;
 /* Runs at module startup, before any ZTS request thread can putenv() and rewrite environ. */
 void profiler_trigger_snapshot(void) {
-    profiler_trusted_sapi = profiler_sapi_in("|fpm-fcgi|apache2handler|cli-server|litespeed|");
+    /* FrankenPHP's _SERVER starts from the process environment and ends with its
+     * configured `env` values, so only its header function is request-owned. */
+    profiler_request_headers =
+        profiler_sapi_in("|frankenphp|")
+            ? zend_hash_str_find_ptr(CG(function_table), ZEND_STRL("frankenphp_request_headers"))
+            : NULL;
+    profiler_trusted_sapi = profiler_request_headers != NULL ||
+                            profiler_sapi_in("|fpm-fcgi|apache2handler|cli-server|litespeed|");
     profiler_request_getenv = profiler_sapi_in("|fpm-fcgi|cgi-fcgi|apache2handler|litespeed|");
     atomic_store(&profiler_inherited_trigger,
                  !profiler_trusted_sapi && getenv("HTTP_X_PHP_PROFILER_TRIGGER") != NULL);
@@ -372,12 +392,23 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
         return -1;
     }
     const char *value = NULL;
-    if (profiler_request_getenv && sapi_module.getenv) {
+    zval headers;
+    ZVAL_UNDEF(&headers);
+    if (profiler_request_headers) {
+        profiler_read_request_headers(&headers);
+        /* Go's http.Header stores every request header under its canonical name. */
+        zval *header =
+            Z_TYPE(headers) == IS_ARRAY
+                ? zend_hash_str_find(Z_ARRVAL(headers), ZEND_STRL("X-Php-Profiler-Trigger"))
+                : NULL;
+        if (header && Z_TYPE_P(header) == IS_STRING)
+            value = Z_STRVAL_P(header);
+    } else if (profiler_request_getenv && sapi_module.getenv) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
                                    sizeof("HTTP_X_PHP_PROFILER_TRIGGER") - 1);
     } else {
-        /* The built-in HTTP server, NGINX Unit and FrankenPHP expose headers through
-         * _SERVER only.
+        /* The built-in HTTP server, NGINX Unit and FrankenPHP before 1.3 expose headers
+         * through _SERVER only.
          * Materialization is engine-owned, but may allocate: contain bailout. */
         if (!profiler_materialize_server())
             return -1;
@@ -389,14 +420,20 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
                 value = Z_STRVAL_P(header);
         }
     }
-    if (!value)
-        return -1;
-    if (!length || length > 4096 || strnlen(value, 4097) != length || memchr(value, ',', length))
-        return 0;
-    volatile unsigned char difference = 0;
-    for (size_t i = 0; i < length; i++)
-        difference |= secret[i] ^ (unsigned char)value[i];
-    return difference == 0;
+    int result;
+    if (!value) {
+        result = -1;
+    } else if (!length || length > 4096 || strnlen(value, 4097) != length ||
+               memchr(value, ',', length)) {
+        result = 0;
+    } else {
+        volatile unsigned char difference = 0;
+        for (size_t i = 0; i < length; i++)
+            difference |= secret[i] ^ (unsigned char)value[i];
+        result = difference == 0;
+    }
+    zval_ptr_dtor(&headers);
+    return result;
 }
 void profiler_auto_log(void) {
     profiler_log(

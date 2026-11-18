@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+### Fixed
+
+- Read FrankenPHP trigger headers from `frankenphp_request_headers()` (FrankenPHP 1.3+), which holds request headers alone: a trigger variable inherited from the process environment no longer makes FrankenPHP ignore every request, and one set with a Caddyfile `env` setting, which FrankenPHP copies over request headers, no longer captures every request whatever trigger header it carries.
+
 ## [0.1.0-alpha.10] - 2026-11-17
 
 ### Commits
