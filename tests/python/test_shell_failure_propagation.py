@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,7 +30,9 @@ class ShellFailurePropagationTests(unittest.TestCase):
         environment = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'],
                            CARGO_TARGET_DIR=str(output), CC=str(tools / 'cc'),
                            LLVM_COV=str(tools / 'cc'), PROFILER_FAULT_OUTPUT=str(output),
-                           PROFILER_FAULT_RUNTIME=str(runtime), PROFILER_FAULT_ROOT=str(directory))
+                           PROFILER_FAULT_RUNTIME=str(runtime), PROFILER_FAULT_ROOT=str(directory),
+                           # Tooling runs on the real PHP; the fake php below only observes direct launches.
+                           PROFILER_TOOL_PHP=shutil.which('php'))
         self.executable(tools / 'cargo', 'touch "$PROFILER_FAULT_ROOT/cargo-called"\nexit 0\n')
         self.executable(tools / 'php', 'touch "$PROFILER_FAULT_ROOT/php-called"\nexit 91\n')
         self.executable(tools / 'rustc', '''if [[ "$*" == *"--print target-libdir"* ]]; then

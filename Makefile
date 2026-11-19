@@ -8,7 +8,7 @@ C_FILES := $(shell find crates tests -type f -not -path '*/target/*' \( -name '*
 help:
 	@echo 'bootstrap doctor fmt fmt-check lint build test test-php test-native-units test-matrix coverage mutation check verify package package-install-smoke release-dry-run bench hooks clean'
 doctor:
-	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
+	scripts/check-tool-versions.sh "$(MAGO)" "$(CLANG_FORMAT)"
 	rustc --version
 	cargo --version
 	php --version
@@ -48,13 +48,13 @@ mutation:
 	scripts/c-mutation.sh
 check: fmt-check lint test test-php test-native-units
 clean:
-	$(PYTHON) scripts/clean-builds.py
+	scripts/clean-builds.sh
 
 .PHONY: package package-check verify
 package:
 	$(PYTHON) scripts/package-source.py
 package-check:
-	$(PYTHON) -m json.tool composer.json >/dev/null
+	php -n -r 'json_decode((string) file_get_contents("composer.json"), flags: JSON_THROW_ON_ERROR);'
 	sh -n scripts/build-extension.sh
 verify: check coverage mutation test-matrix package-check
 
@@ -74,7 +74,7 @@ bench:
 
 .PHONY: formatter-versions
 formatter-versions:
-	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
+	scripts/check-tool-versions.sh "$(MAGO)" "$(CLANG_FORMAT)"
 
 .PHONY: package-install-smoke
 package-install-smoke: package

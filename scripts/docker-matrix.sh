@@ -17,32 +17,7 @@ mkdir -p "$compatibility"
 # Freeze one source snapshot so every matrix cell validates identical inputs.
 snapshot=$(mktemp -d "$compatibility/source-XXXXXXXX")
 # Keep the immutable source/runner receipt for every cell, including failures.
-python3 - "$snapshot" <<'PYCOPYROOT'
-import pathlib, shutil, sys
-sys.path.insert(0, 'scripts')
-from validation_inputs import snapshot
-root = pathlib.Path.cwd()
-destination = pathlib.Path(sys.argv[1])
-for name in snapshot(root):
-    source = root / name
-    target = destination / name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-PYCOPYROOT
-python3 - "$snapshot" <<'PYCOPY'
-import pathlib, shutil, sys
-snapshot = pathlib.Path(sys.argv[1])
-for name in ('crates', 'scripts', 'tests', 'vendor', 'schema', '.github'):
-    shutil.copytree(name, snapshot / name, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns('target', '__pycache__', 'mutants.out', '.DS_Store'))
-PYCOPY
-python3 - "$snapshot" "$compatibility/source-sha256.json" <<'PYHASH'
-import hashlib, json, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-files = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-         for p in root.rglob('*') if p.is_file() and '__pycache__' not in p.parts}
-pathlib.Path(sys.argv[2]).write_text(json.dumps(files, sort_keys=True, indent=2))
-PYHASH
+scripts/php-tool.sh scripts/source-snapshot.php "$snapshot" "$compatibility/source-sha256.json"
 run_fpm_suite() {
   docker run --rm "$image" python3 scripts/automatic-tests.py --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
   docker run --rm "$image" python3 scripts/fpm-test.py | tee "$compatibility/${version}-${sapi}-fpm.log"
@@ -73,7 +48,7 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
     docker build -f "$snapshot/tests/docker/Dockerfile" --build-arg "PHP_IMAGE=$php_image" -t "$image" "$snapshot"
     expected_zts=nts
     if [[ "$sapi" == zts || "$sapi" == frankenphp ]]; then expected_zts=ts; fi
-    docker run --rm "$image" python3 scripts/php-environment-check.py --version "$version" --zts "$expected_zts" \
+    docker run --rm "$image" scripts/php-tool.sh scripts/php-environment-check.php --version "$version" --zts "$expected_zts" \
       | tee "$compatibility/${version}-${sapi}-runtime.json"
     if [[ "$sapi" == apache || "$sapi" == frankenphp ]]; then
       # The other cells cover the CLI; these check only how each server hands requests to PHP.

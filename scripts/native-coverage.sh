@@ -10,13 +10,13 @@ run_directory=$(mktemp -d "$coverage_root/run-XXXXXXXX")
 export CARGO_TARGET_DIR="$run_directory/build"
 export CARGO_LLVM_COV_TARGET_DIR="$CARGO_TARGET_DIR"
 export CARGO_LLVM_COV_BUILD_DIR="$CARGO_TARGET_DIR"
-python3 scripts/coverage-snapshot.py "$PWD" > "$run_directory/source-before.json"
+scripts/php-tool.sh scripts/coverage-snapshot.php "$PWD" > "$run_directory/source-before.json"
 # Invoked indirectly by the EXIT trap; verified by provenance regression tests.
 # shellcheck disable=SC2329
 finish_coverage_run() {
   final_status=$?
   trap - EXIT
-  python3 scripts/coverage-snapshot.py "$PWD" > "$run_directory/source-after.json" || final_status=1
+  scripts/php-tool.sh scripts/coverage-snapshot.php "$PWD" > "$run_directory/source-after.json" || final_status=1
   python3 scripts/coverage-run-manifest.py "$run_directory" "$coverage_root" "$final_status" \
     --artifact coverage.json --artifact coverage-native-first.json --artifact c-coverage.json \
     --artifact export-diagnostics.json --artifact flags.json || { if [[ "$final_status" == 0 ]]; then final_status=1; fi; }

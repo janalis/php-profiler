@@ -8,11 +8,11 @@ coverage_root=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys
 mkdir -p "$coverage_root"
 CARGO_TARGET_DIR="$(mktemp -d "$coverage_root/run-XXXXXXXX")"
 export CARGO_TARGET_DIR
-python3 scripts/coverage-snapshot.py "$PWD" > "$CARGO_TARGET_DIR/source-before.json"
+scripts/php-tool.sh scripts/coverage-snapshot.php "$PWD" > "$CARGO_TARGET_DIR/source-before.json"
 finish_coverage_run() {
   final_status=$?
   trap - EXIT
-  python3 scripts/coverage-snapshot.py "$PWD" > "$CARGO_TARGET_DIR/source-after.json" || final_status=1
+  scripts/php-tool.sh scripts/coverage-snapshot.php "$PWD" > "$CARGO_TARGET_DIR/source-after.json" || final_status=1
   python3 scripts/coverage-run-manifest.py "$CARGO_TARGET_DIR" "$coverage_root" "$final_status" \
     --artifact reports/strict-summary.json --artifact clang.txt --artifact llvm-cov.txt --artifact flags.json \
     --artifact-directory reports || { if [[ "$final_status" == 0 ]]; then final_status=1; fi; }

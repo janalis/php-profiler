@@ -11,13 +11,13 @@ export CARGO_TARGET_DIR
 mkdir -p "$CARGO_TARGET_DIR/results"
 report_directory=$(mktemp -d "$CARGO_TARGET_DIR/results/run-XXXXXXXX")
 mkdir -p "$report_directory/provenance"
-python3 scripts/coverage-snapshot.py "$PWD" > "$report_directory/provenance/source-before.json"
+scripts/php-tool.sh scripts/coverage-snapshot.php "$PWD" > "$report_directory/provenance/source-before.json"
 # Invoked indirectly by the EXIT trap; verified by provenance regression tests.
 # shellcheck disable=SC2329
 finish_mutation_run() {
   final_status=$?
   trap - EXIT
-  python3 scripts/coverage-snapshot.py "$PWD" > "$report_directory/provenance/source-after.json" || final_status=1
+  scripts/php-tool.sh scripts/coverage-snapshot.php "$PWD" > "$report_directory/provenance/source-after.json" || final_status=1
   python3 - "$report_directory" "$final_status" <<'PYFINAL'
 import hashlib, json, sys
 from pathlib import Path
