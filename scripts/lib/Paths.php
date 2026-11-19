@@ -1,0 +1,119 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PhpProfiler\Tooling;
+
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use SplFileInfo;
+
+/** Path helpers that match Python's pathlib, so ported gates select the same files. */
+final class Paths
+{
+    /** Like Path.resolve(): absolute, symlinks resolved where they exist, the rest normalized. */
+    public static function resolve(string $path): string
+    {
+        if (!str_starts_with($path, '/')) {
+            $path = getcwd() . '/' . $path;
+        }
+        $current = '/';
+        foreach (explode('/', $path) as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part === '..') {
+                $current = dirname($current);
+                continue;
+            }
+            $candidate = ($current === '/' ? '' : $current) . '/' . $part;
+            $real = realpath($candidate);
+            $current = $real === false ? $candidate : $real;
+        }
+        return $current;
+    }
+
+    /** Like Path.suffix: the last dot-separated part of the name, ignoring a leading dot. */
+    public static function suffix(string $path): string
+    {
+        $name = basename($path);
+        $dot = strrpos($name, '.');
+        return $dot === false || $dot === 0 || $dot === (strlen($name) - 1) ? '' : substr($name, $dot);
+    }
+
+    /** Orders paths like sorted() over pathlib paths: component by component. */
+    public static function compare(string $left, string $right): int
+    {
+        return explode('/', $left) <=> explode('/', $right);
+    }
+
+    /** @param list<string> $paths */
+    public static function sort(array $paths): array
+    {
+        usort($paths, self::compare(...));
+        return $paths;
+    }
+
+    /**
+     * Files below a directory, like Path.rglob('*') filtered on is_file(): symlinked
+     * directories are not entered, symlinks to files are included.
+     *
+     * @return list<string>
+     */
+    public static function files(string $directory): array
+    {
+        if (!is_dir($directory)) {
+            return [];
+        }
+        $files = [];
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(
+            $directory,
+            FilesystemIterator::SKIP_DOTS,
+        ));
+        foreach ($iterator as $file) {
+            if ($file instanceof SplFileInfo && $file->isFile()) {
+                $files[] = $file->getPathname();
+            }
+        }
+        return $files;
+    }
+
+    /**
+     * The exhaustive runtime source registry shared by coverage and mutation gates.
+     *
+     * @return list<string> resolved paths, sorted
+     */
+    public static function runtimeSources(string $root, string $language = 'all'): array
+    {
+        $suffixes = match ($language) {
+            'all' => ['.rs', '.c'],
+            'rust' => ['.rs'],
+            default => ['.c'],
+        };
+        $sources = [];
+        foreach (scandir($crates = self::resolve($root) . '/crates') ?: [] as $crate) {
+            if ($crate === '.' || $crate === '..' || !is_dir("{$crates}/{$crate}")) {
+                continue;
+            }
+            foreach (self::files("{$crates}/{$crate}/src") as $path) {
+                if (in_array(self::suffix($path), $suffixes, true)) {
+                    $sources[self::resolve($path)] = true;
+                }
+            }
+        }
+        return self::sort(array_map(strval(...), array_keys($sources)));
+    }
+
+    /** Like shutil.which(): the first executable file of that name on PATH. */
+    public static function which(string $program, ?string $path = null): ?string
+    {
+        foreach (explode(':', $path ?? (string) getenv('PATH')) as $directory) {
+            $candidate = ($directory === '' ? '.' : $directory) . '/' . $program;
+            if (is_file($candidate) && is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+}

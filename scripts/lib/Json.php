@@ -22,7 +22,7 @@ final class Json
     private static function value(mixed $value, ?int $indent, bool $sortKeys, int $depth): string
     {
         if ($value === null || is_bool($value) || is_int($value) || is_string($value)) {
-            return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         }
         if ($value instanceof stdClass) {
             return self::entries(get_object_vars($value), false, $indent, $sortKeys, $depth);

@@ -3,18 +3,20 @@
 declare(strict_types=1);
 
 // Verifies an actual PHP and SDK installation against the requested CI matrix label.
+require __DIR__ . '/lib/Arguments.php';
 require __DIR__ . '/lib/Json.php';
 require __DIR__ . '/lib/Process.php';
 
+use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\Json;
 use PhpProfiler\Tooling\Process;
 
-$options = getopt('', ['version:', 'zts:']);
+$usage = 'php-environment-check.php --version <major.minor> --zts nts|ts';
+['options' => $options, 'positionals' => $positionals] = Arguments::parse($argv, ['version', 'zts'], usage: $usage);
 $expectedMinor = $options['version'] ?? null;
 $expectedZts = $options['zts'] ?? null;
-if (!is_string($expectedMinor) || !in_array($expectedZts, ['nts', 'ts'], true)) {
-    fwrite(STDERR, "usage: php-environment-check.php --version <major.minor> --zts nts|ts\n");
-    exit(2);
+if ($positionals !== [] || !is_string($expectedMinor) || !in_array($expectedZts, ['nts', 'ts'], true)) {
+    Arguments::fail('--version and --zts nts|ts are required', $usage);
 }
 $php = getenv('PHP') ?: 'php';
 $config = getenv('PHP_CONFIG') ?: 'php-config';

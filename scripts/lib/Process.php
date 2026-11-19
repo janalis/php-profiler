@@ -14,20 +14,23 @@ final class Process
      * @param array<string, string>|null $environment
      * @return array{status: int, stdout: string, stderr: string}
      */
-    public static function run(array $command, ?array $environment = null, ?string $directory = null): array
-    {
+    public static function run(
+        array $command,
+        ?array $environment = null,
+        ?string $directory = null,
+        ?string $input = null,
+    ): array {
         $output = tmpfile();
         $errors = tmpfile();
-        if ($output === false || $errors === false) {
+        $source = $input === null ? ['file', '/dev/null', 'r'] : tmpfile();
+        if ($output === false || $errors === false || $source === false) {
             throw new RuntimeException('create process capture files');
         }
-        $process = proc_open(
-            $command,
-            [0 => ['file', '/dev/null', 'r'], 1 => $output, 2 => $errors],
-            $pipes,
-            $directory,
-            $environment,
-        );
+        if ($input !== null) {
+            fwrite($source, $input);
+            rewind($source);
+        }
+        $process = proc_open($command, [0 => $source, 1 => $output, 2 => $errors], $pipes, $directory, $environment);
         if ($process === false) {
             throw new RuntimeException('start ' . $command[0]);
         }
@@ -42,17 +45,31 @@ final class Process
     }
 
     /**
+     * Like subprocess.check_output(): the standard output of a successful command.
+     *
      * @param list<string> $command
      * @param array<string, string>|null $environment
      */
-    public static function output(array $command, ?array $environment = null): string
+    public static function output(array $command, ?array $environment = null, ?string $input = null): string
     {
-        $result = self::run($command, $environment);
+        $result = self::run($command, $environment, input: $input);
         if ($result['status'] !== 0) {
-            throw new RuntimeException(
-                $command[0] . ' exited with status ' . $result['status'] . ': ' . $result['stderr'],
-            );
+            throw new ProcessFailedStatus($command, $result['status'], $result['stderr']);
         }
         return $result['stdout'];
+    }
+}
+
+final class ProcessFailedStatus extends RuntimeException
+{
+    /** @param list<string> $command */
+    public function __construct(
+        public readonly array $command,
+        public readonly int $status,
+        string $stderr,
+    ) {
+        parent::__construct(
+            $command[0] . ' exited with status ' . $status . ($stderr === '' ? '' : ': ' . trim($stderr)),
+        );
     }
 }

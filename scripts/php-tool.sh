@@ -12,4 +12,5 @@ for extension in ffi pcntl posix; do
     set -- -d "extension=$extension" "$@"
   fi
 done
-exec "$php" -n -d ffi.enable=1 -d display_errors=stderr -d error_reporting=-1 "$@"
+# Coverage exports decode to large arrays; tooling is not memory-bounded like a request.
+exec "$php" -n -d ffi.enable=1 -d memory_limit=-1 -d display_errors=stderr -d error_reporting=-1 "$@"
