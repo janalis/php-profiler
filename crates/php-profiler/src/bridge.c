@@ -512,12 +512,43 @@ static void profiler_worker_restore(zval *argument, zval *handler, zval *previou
     profiler_worker_handler = previous;
     ZVAL_COPY_VALUE(argument, handler);
 }
+/* Whether FrankenPHP's getenv hook also answers from the worker script's environment, as it
+ * does from 1.13.4; set when the handler is installed. */
+static bool profiler_worker_environment;
+/* Whether FrankenPHP's module version, such as "v1.13.6": "major.minor.patch", optionally
+ * after a "v" and before any suffix, is 1.13.4 or later. An unknown version is not. */
+static bool profiler_worker_environment_version(const char *version) {
+    unsigned major, minor, patch;
+    if (version && *version == 'v')
+        version++;
+    if (!version || sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3)
+        return false;
+    return major > 1 || (major == 1 && (minor > 13 || (minor == 13 && patch >= 4)));
+}
+/* Whether this request may run a FrankenPHP worker script. Every worker's environment holds
+ * FRANKENPHP_WORKER, which FrankenPHP 1.13.4+ serves through its getenv hook. Only a request
+ * where neither that hook nor _SERVER holds it is certainly not a worker. Older versions
+ * cannot tell, so every call counts as a worker's there, as does any request whose _SERVER
+ * cannot be read. */
+static bool profiler_worker_request(void) {
+    if (!profiler_worker_environment || !sapi_module.getenv ||
+        sapi_module.getenv("FRANKENPHP_WORKER", sizeof("FRANKENPHP_WORKER") - 1))
+        return true;
+    if (!profiler_materialize_server())
+        return true;
+    zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
+    return Z_TYPE_P(server) != IS_ARRAY ||
+           zend_hash_str_exists(Z_ARRVAL_P(server), ZEND_STRL("FRANKENPHP_WORKER"));
+}
 static ZEND_NAMED_FUNCTION(profiler_handle_request) {
-    /* FrankenPHP rejects any other call itself. */
+    /* FrankenPHP rejects any other call itself, including every call outside worker mode:
+     * that request's capture must not end before the refusal. */
     bool wrap = ZEND_NUM_ARGS() == 1;
     zval *argument = ZEND_CALL_ARG(execute_data, 1);
     if (wrap)
         wrap = zend_is_callable(argument, 0, NULL);
+    if (wrap)
+        wrap = profiler_worker_request();
     if (!wrap) {
         profiler_handle_request_original(execute_data, return_value);
         return;
@@ -542,6 +573,10 @@ static ZEND_NAMED_FUNCTION(profiler_handle_request) {
  * extension already took leaves worker requests uncaptured: Zend reports the duplicate. */
 void profiler_worker_register(void) {
     profiler_handle_request_function = NULL;
+    zend_module_entry *frankenphp =
+        zend_hash_str_find_ptr(&module_registry, ZEND_STRL("frankenphp"));
+    profiler_worker_environment =
+        profiler_worker_environment_version(frankenphp ? frankenphp->version : NULL);
     if (!profiler_sapi_in("|frankenphp|"))
         return;
     zend_function *function =

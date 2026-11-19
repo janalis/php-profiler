@@ -508,6 +508,18 @@ static const zend_function_entry automatic_test_worker_functions[] = {
     ZEND_NAMED_FE(frankenphp_handle_request, ZEND_FN(automatic_test_handle_request),
                   arginfo_automatic_handle_request)
         ZEND_FE(automatic_test_worker_handler, arginfo_automatic_worker_handler) ZEND_FE_END};
+/* FrankenPHP's module, as far as the bridge reads it: its version. */
+static zend_module_entry automatic_test_frankenphp = {
+    STANDARD_MODULE_HEADER,    "frankenphp", NULL, NULL, NULL, NULL, NULL, NULL, "v1.13.4",
+    STANDARD_MODULE_PROPERTIES};
+/* FrankenPHP 1.13.4+'s getenv hook: answers FRANKENPHP_WORKER, by its exact name and length,
+ * with automatic_worker_environment, and nothing else. */
+static const char *automatic_worker_environment;
+static char *automatic_worker_getenv(const char *name, size_t length) {
+    return length == strlen("FRANKENPHP_WORKER") && !strcmp(name, "FRANKENPHP_WORKER")
+               ? (char *)automatic_worker_environment
+               : NULL;
+}
 /* Serves one worker request whose callback is `callback`; returns its result. */
 /* Whether the last served callback was handed back for the frame to release. */
 static bool automatic_worker_released;
@@ -597,6 +609,73 @@ static bool automatic_worker_contract(void) {
     zend_clear_exception();
     zval_ptr_dtor(&name);
     zval_ptr_dtor(&direct);
+    /* FrankenPHP's getenv hook answers from the worker's environment from 1.13.4 only, as
+     * its module reports when the handler is installed. */
+    correct &= !profiler_worker_environment;
+    correct &= zend_hash_str_add_ptr(&module_registry, ZEND_STRL("frankenphp"),
+                                     &automatic_test_frankenphp) != NULL;
+    profiler_worker_unregister();
+    profiler_worker_register();
+    correct &= profiler_worker_environment;
+    profiler_worker_unregister();
+    correct &= zend_hash_str_del(&module_registry, ZEND_STRL("frankenphp")) == SUCCESS;
+    profiler_worker_register();
+    correct &= !profiler_worker_environment;
+    correct &= !profiler_worker_environment_version(NULL);
+    correct &= !profiler_worker_environment_version("dev");
+    correct &= !profiler_worker_environment_version("1.13");
+    correct &= !profiler_worker_environment_version("1.13.3");
+    correct &= !profiler_worker_environment_version("1.12.9");
+    correct &= !profiler_worker_environment_version("0.99.99");
+    correct &= profiler_worker_environment_version("1.13.4");
+    /* FrankenPHP reports its release tag, such as "v1.13.6". */
+    correct &= profiler_worker_environment_version("v1.13.4");
+    correct &= !profiler_worker_environment_version("v1.13.3");
+    correct &= !profiler_worker_environment_version("vv1.13.4");
+    correct &= profiler_worker_environment_version("1.13.6-dev");
+    correct &= profiler_worker_environment_version("1.14.0");
+    correct &= profiler_worker_environment_version("2.0.0");
+    /* Where it does, a request whose environment and _SERVER both lack FRANKENPHP_WORKER is
+     * not a worker's: FrankenPHP refuses the call itself (here, the stand-in calls the
+     * application's callback directly) and the request is not ended. */
+    zend_is_auto_global_str(ZEND_STRL("_SERVER"));
+    zval *server = &PG(http_globals)[TRACK_VARS_SERVER];
+    zval saved_server;
+    ZVAL_COPY_VALUE(&saved_server, server);
+    array_init(server);
+    add_assoc_string(server, "FRANKENPHP_WORKER_ID", "1");
+    sapi_module.getenv = automatic_worker_getenv;
+    automatic_worker_environment = NULL;
+    automatic_worker_mode = 0;
+    /* An older FrankenPHP cannot tell: the call counts as a worker's. */
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= !strcmp(automatic_worker_log, "ebhe");
+    profiler_worker_environment = true;
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+    correct &= !strcmp(automatic_worker_log, "h") && profiler_worker_handler == NULL;
+    correct &= automatic_worker_released;
+    /* FrankenPHP's environment marks a worker. */
+    automatic_worker_environment = "1";
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+    correct &= !strcmp(automatic_worker_log, "ebhe");
+    /* So does _SERVER alone. */
+    automatic_worker_environment = NULL;
+    add_assoc_string(server, "FRANKENPHP_WORKER", "1");
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= !strcmp(automatic_worker_log, "ebhe");
+    /* A _SERVER that is not an array cannot tell, so the call counts as a worker's. */
+    zval_ptr_dtor(server);
+    ZVAL_NULL(server);
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= !strcmp(automatic_worker_log, "ebhe");
+    ZVAL_COPY_VALUE(server, &saved_server);
+    sapi_module.getenv = NULL;
+    /* Without a getenv hook, the call counts as a worker's too. */
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= !strcmp(automatic_worker_log, "ebhe");
+    profiler_worker_environment = false;
     profiler_worker_unregister();
     correct &= handle->internal_function.handler == original;
     correct &= !automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
@@ -911,6 +990,23 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         zend_catch { bailed = true; }
         zend_end_try();
         correct &= bailed && !strcmp(automatic_worker_log, "e") && profiler_worker_handler == NULL;
+    } else if (mode && strcmp(mode, "worker-materialize") == 0) {
+        /* With FrankenPHP's getenv hook silent, an unreadable _SERVER still counts as a
+         * worker's: the request is served as one. Its deferred bailout is consumed by the
+         * request boundaries that follow. */
+        correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
+                                          MODULE_PERSISTENT) == SUCCESS;
+        sapi_module.name = "frankenphp";
+        profiler_worker_register();
+        profiler_worker_environment = true;
+        sapi_module.getenv = automatic_worker_getenv;
+        automatic_worker_environment = NULL;
+        automatic_worker_mode = 0;
+        automatic_fault = 4;
+        zval result = automatic_worker_serve("automatic_test_worker_handler");
+        automatic_fault = 0;
+        correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+        correct &= !strcmp(automatic_worker_log, "ebhe");
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");

@@ -722,7 +722,8 @@ function serverRequest(int $port, ?string $token, string $path = '/'): ?string
 if ((string) getenv('FRANKENPHP') !== '') {
     /**
      * Serves root/ with php-server, or through a Caddyfile when $configured names an env value.
-     * A $worker script serves every request from one worker thread.
+     * A $worker script serves every request from one worker thread; a $script replaces the
+     * classic index.php.
      *
      * @return array{BackgroundProcess, int}
      */
@@ -732,6 +733,7 @@ if ((string) getenv('FRANKENPHP') !== '') {
         ?string $configured = null,
         string $mode = 'trigger',
         ?string $worker = null,
+        ?string $script = null,
     ) use ($extension): array {
         $configuration = "{$directory}/conf";
         $root = "{$directory}/root";
@@ -741,7 +743,7 @@ if ((string) getenv('FRANKENPHP') !== '') {
             "{$configuration}/profiler.ini",
             "extension={$extension}\nphp_profiler.mode={$mode}\nphp_profiler.trigger_secret=franken-secret\nphp_profiler.output_dir={$directory}\n",
         );
-        file_put_contents("{$root}/index.php", $worker ?? '<?php echo "ok";');
+        file_put_contents("{$root}/index.php", $worker ?? $script ?? '<?php echo "ok";');
         $port = HttpClient::freePort();
         $command = [(string) getenv('FRANKENPHP'), 'php-server', '--listen', "127.0.0.1:{$port}", '--root', $root];
         if ($worker !== null) {
@@ -894,6 +896,47 @@ if ((string) getenv('FRANKENPHP') !== '') {
     $start = array_values(array_diff_key($found, array_flip($served)))[0];
     check($start['elapsed_wall_ns'] < 1_000_000_000, $start['elapsed_wall_ns']);
     echo "automatic FrankenPHP worker checks passed\n";
+
+    // Outside worker mode FrankenPHP refuses frankenphp_handle_request(); the request keeps
+    // its one capture, including what runs after the refused call.
+    $classic = <<<'CLASSIC'
+        <?php
+        function profiler_before_refused_call(): void {}
+        function profiler_after_refused_call(): void {}
+        profiler_before_refused_call();
+        try {
+            frankenphp_handle_request(static function (): void {});
+            echo 'accepted';
+        } catch (RuntimeException $refused) {
+            echo 'ok';
+        }
+        profiler_after_refused_call();
+
+        CLASSIC;
+    $environment = $phpEnvironment;
+    unset($environment['HTTP_X_PHP_PROFILER_TRIGGER']);
+    $directory = ExceptionFixture::temporaryDirectory('profiler-franken-classic-');
+    [$process, $port] = $frankenphp($directory, $environment, mode: 'always', script: $classic);
+    try {
+        $identifier = serverRequest($port, null);
+    } catch (Throwable $failure) {
+        $stopFrankenphp($process, $failure);
+    }
+    $log = $stopFrankenphp($process);
+    $classicReports = reports($directory);
+    check($identifier !== null && count($classicReports) === 1, $identifier, $classicReports, $log);
+    $classicReport = report($classicReports[0]);
+    $calls = static fn(string $name): int => $classicReport['functions'][$name]['calls'] ?? 0;
+    check(
+        basename($classicReports[0]) === "php-profile-{$identifier}.json"
+        && $classicReport['termination_reason'] === 'request_complete'
+        && $calls('profiler_before_refused_call') === 1
+        && $calls('profiler_after_refused_call') === 1,
+        $classicReport['termination_reason'] ?? null,
+        array_keys($classicReport['functions'] ?? []),
+        $log,
+    );
+    echo "automatic FrankenPHP classic-mode checks passed\n";
 }
 
 // Apache's mod_php answers getenv from the request, so an inherited variable shadows nothing.

@@ -579,3 +579,18 @@ tool reads the inherited environment through `Process::environment()`. Under tha
 again fail the sampling controller step by its 30-second timeout, as they did under Python. The
 dependency hashes renew for `scripts/native-bailout-tests.php` and `scripts/owned-run.php`, which
 now build the children's environment that way.
+
+## 2026-11-19 FrankenPHP calls outside worker mode
+
+`frankenphp_handle_request()`'s handler used to end the open profiler request before calling
+FrankenPHP's own, even outside worker mode, where FrankenPHP only refuses the call: the request's
+capture ended just before the refusal. The handler now wraps the call only when the request may
+belong to a worker. FrankenPHP's getenv hook answers from the worker script's environment from
+1.13.4 only, which the handler learns from FrankenPHP's module version when it is installed. There,
+a request is a worker's when that hook or `_SERVER` holds `FRANKENPHP_WORKER`, or when `_SERVER`
+cannot be read. With an older, unknown or unparsable version, or without the hook, every call
+still counts as a worker's. The new code is again after every recorded coordinate, so only the
+source and dependency hashes renew. The bridge unit test's version boundaries, its stand-in
+`frankenphp` module, its name-aware getenv stand-in (environment, `_SERVER` alone, neither, a
+`_SERVER` that is not an array, an older version, no hook), the isolated `worker-materialize`
+bailout mode, and the FrankenPHP classic-mode integration check must kill the new mutants.
