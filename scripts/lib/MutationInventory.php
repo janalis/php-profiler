@@ -38,7 +38,7 @@ final class MutationInventory
                 count($parts) < 5
                 || array_filter(
                     $coordinates,
-                    static fn(string $value): bool => !ctype_digit($value) || (int) $value <= 0,
+                    static fn(string $value): bool => !preg_match('/\A\d+\z/', $value) || (int) $value <= 0,
                 ) !== []
             ) {
                 throw new InvalidArgumentException('Malformed native mutation identity');
