@@ -27,6 +27,10 @@ final class FpmServer
     private string $address;
     /** @var resource|null */
     private $process = null;
+    /** @var list<string>|null php-cgi settings when this is a php-cgi -b server */
+    private ?array $cgiSettings = null;
+    /** The server's log after the last serve(): FPM's error log, or php-cgi's standard error. */
+    public string $lastLog = '';
 
     /**
      * @param array<string, string|int> $iniSettings
@@ -41,6 +45,19 @@ final class FpmServer
         if ($workers < 1) {
             throw new InvalidArgumentException('FPM worker count must be a positive integer');
         }
+    }
+
+    /**
+     * php-cgi -b speaks the same FastCGI protocol as FPM but reads the process environment.
+     *
+     * @param list<string> $settings
+     * @param array<string, string> $environment
+     */
+    public static function phpCgi(array $settings, array $environment): self
+    {
+        $server = new self(environment: $environment);
+        $server->cgiSettings = $settings;
+        return $server;
     }
 
     /**
@@ -61,12 +78,14 @@ final class FpmServer
             throw $diagnostics === ''
                 ? $failure
                 : new RuntimeException(
-                    $failure->getMessage() . "\nFPM master diagnostics:\n" . $diagnostics,
+                    $failure->getMessage()
+                    . ($this->cgiSettings === null ? "\nFPM master diagnostics:\n" : "\nphp-cgi stderr:\n")
+                    . $diagnostics,
                     0,
                     $failure,
                 );
         }
-        $this->stop();
+        $this->lastLog = $this->stop();
         return $result;
     }
 
@@ -143,6 +162,11 @@ final class FpmServer
     {
         $this->directory = sys_get_temp_dir() . '/php-profiler-fpm-' . bin2hex(random_bytes(6));
         mkdir($this->directory, 0o700) || throw new RuntimeException('create ' . $this->directory);
+        if ($this->cgiSettings !== null) {
+            $this->address = $this->directory . '/cgi.sock';
+            $this->launch(['php-cgi', ...$this->cgiSettings, '-b', $this->address], 'php-cgi');
+            return;
+        }
         $this->address = $this->directory . '/fpm.sock';
         $config = $this->directory . '/fpm.conf';
         file_put_contents($config, <<<INI
@@ -165,13 +189,19 @@ final class FpmServer
         foreach ($this->iniSettings as $name => $value) {
             array_push($command, '-d', "{$name}={$value}");
         }
+        $this->launch($command, 'FPM');
+    }
+
+    /** @param list<string> $command */
+    private function launch(array $command, string $what): void
+    {
         $descriptors = [
             0 => ['file', '/dev/null', 'r'],
-            1 => ['file', $this->directory . '/stdout', 'w'],
+            1 => ['file', '/dev/null', 'w'],
             2 => ['file', $this->directory . '/stderr', 'w'],
         ];
         $this->process = proc_open($command, $descriptors, $pipes, null, $this->environment)
-        ?: throw new RuntimeException('start php-fpm');
+        ?: throw new RuntimeException('start ' . $command[0]);
         try {
             for ($attempt = 0; $attempt < 100; $attempt++) {
                 if (file_exists($this->address)) {
@@ -182,18 +212,18 @@ final class FpmServer
                 }
                 usleep(50_000);
             }
-            throw new RuntimeException('FPM socket startup timed out');
+            throw new RuntimeException("{$what} socket startup timed out");
         } catch (\Throwable $failure) {
             $this->stop();
             throw $failure;
         }
     }
 
-    /** Stops the master and returns its error log. */
+    /** Stops the server and returns its log: FPM's error log, or php-cgi's standard error. */
     private function stop(): string
     {
         $log = $this->directory . '/error.log';
-        $diagnostics = is_file($log) ? (string) file_get_contents($log) : '';
+        $diagnostics = $this->cgiSettings === null && is_file($log) ? (string) file_get_contents($log) : '';
         if ($this->process !== null) {
             if (proc_get_status($this->process)['running']) {
                 proc_terminate($this->process, SIGTERM);
@@ -207,6 +237,9 @@ final class FpmServer
             }
             proc_close($this->process);
             $this->process = null;
+        }
+        if ($this->cgiSettings !== null) {
+            $diagnostics = (string) @file_get_contents($this->directory . '/stderr');
         }
         Paths::removeTree($this->directory);
         return $diagnostics;

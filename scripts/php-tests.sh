@@ -45,4 +45,4 @@ PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/metadata-tests.php
 "${php_command[@]}" -n -d "extension=$extension" tests/native/runtime-state.php
 
 "${php_command[@]}" -n -d "extension=$extension" tests/native/root-directory.php
-PROFILER_EXTENSION="$extension" python3 scripts/automatic-tests.py
+PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/automatic-tests.php
