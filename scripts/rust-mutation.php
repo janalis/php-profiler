@@ -51,7 +51,7 @@ chdir($root);
 // Standalone Rust test executables do not host Zend. Only the native test
 // driver's separate cdylib build enables private Zend-linked contracts.
 $privateFlags = ['PROFILER_ADAPTER_CONTRACT_TEST', 'PROFILER_C_UNIT_BOUNDARIES', 'PROFILER_SAMPLING_UNIT'];
-$environment = array_diff_key(getenv(), array_flip($privateFlags));
+$environment = array_diff_key(Process::environment(), array_flip($privateFlags));
 $environment['CARGO_INCREMENTAL'] = '0';
 $parent = Paths::resolve((string) ($options['output'] ?? "{$root}/target/rust-mutation"));
 if (!is_dir($parent) && !mkdir($parent, 0o777, true)) {
@@ -61,15 +61,7 @@ if (!is_dir($parent) && !mkdir($parent, 0o777, true)) {
 do {
     $run = $parent . '/run-' . bin2hex(random_bytes(4));
 } while (!@mkdir($run, 0o700));
-$pathOrdered = static function (array $snapshot): array {
-    // Python's snapshot dict follows sorted() over pathlib paths.
-    $ordered = [];
-    foreach (Paths::sort(array_map(strval(...), array_keys($snapshot))) as $name) {
-        $ordered[$name] = $snapshot[$name];
-    }
-    return $ordered;
-};
-$before = $pathOrdered(ValidationInputs::snapshot($root));
+$before = ValidationInputs::inPathOrder(ValidationInputs::snapshot($root));
 file_put_contents("{$run}/source-before.json", Json::encode((object) $before, indent: 2, sortKeys: false) . "\n");
 $metadata = json_decode(
     Process::output(['cargo', 'metadata', '--format-version', '1', '--no-deps'], $environment),
@@ -229,7 +221,8 @@ try {
             $run,
         ];
         $manifest['test_command'] = $testing;
-        $process = proc_open($testing, [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes, null, $environment);
+        // Inherit the descriptors themselves, so a redirected log keeps every line.
+        $process = proc_open($testing, [], $pipes, null, $environment);
         $status = $process === false ? 1 : proc_close($process);
         $outcomes = json_decode(
             (string) file_get_contents("{$run}/mutants.out/outcomes.json"),
@@ -262,7 +255,7 @@ try {
     fwrite(STDERR, $failure->getMessage() . "\n");
     $status = 1;
 } finally {
-    $after = $pathOrdered(ValidationInputs::snapshot($root));
+    $after = ValidationInputs::inPathOrder(ValidationInputs::snapshot($root));
     file_put_contents("{$run}/source-after.json", Json::encode((object) $after, indent: 2, sortKeys: false) . "\n");
     $changed = [];
     foreach (array_keys($before + $after) as $key) {

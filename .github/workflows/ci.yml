@@ -97,12 +97,9 @@ jobs:
       - run: scripts/php-tool.sh scripts/test-vendored-exception.php
       - run: scripts/php-tool.sh scripts/clone-bailout-tests.php
       - run: scripts/php-tool.sh scripts/exception-bailout-tests.php
-      - run: python3 scripts/adapter-contract-tests.py
+      - run: scripts/php-tool.sh scripts/adapter-contract-tests.php
       - name: Validate real reports against the published schema
-        run: |
-          python3 -m venv target/dev-venv
-          target/dev-venv/bin/pip install -r requirements-dev.txt
-          PROFILER_EXTENSION="$PWD/target/debug/libphp_profiler.so" target/dev-venv/bin/python scripts/schema-tests.py
+        run: PROFILER_EXTENSION="$PWD/target/debug/libphp_profiler.so" scripts/php-tool.sh scripts/schema-tests.php
   coverage:
     needs: source-pin
     runs-on: ubuntu-24.04
@@ -114,7 +111,7 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
-          extensions: pdo_sqlite, curl, pcntl
+          extensions: pdo_sqlite, curl, pcntl, ffi, posix
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: nightly-2026-11-11
@@ -174,7 +171,7 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
-          extensions: pdo_sqlite, curl, pcntl
+          extensions: pdo_sqlite, curl, pcntl, ffi, posix
       - run: scripts/php-tool.sh scripts/rust-mutation.php --timeout 240 --jobs 2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -206,7 +203,7 @@ jobs:
           if [[ '${{ matrix.sapi }}' == fpm ]]; then fpm_args=(--fpm); fi
           docker run --rm --network=none -v "$PWD/target/performance:/evidence" \
             'local-php-profiler:${{ matrix.php }}-${{ matrix.sapi }}' \
-            python3 scripts/performance-evidence.py --extension /profiler/target/release/libphp_profiler.so \
+            scripts/php-tool.sh scripts/performance-evidence.php --extension /profiler/target/release/libphp_profiler.so \
             --output /evidence --with-sampling --with-warm-disabled "${fpm_args[@]}"
       - name: Make container receipts readable by the artifact uploader
         if: always()
@@ -237,7 +234,7 @@ jobs:
         with:
           php-version: '8.5'
           coverage: none
-          extensions: pdo_sqlite, curl, pcntl
+          extensions: pdo_sqlite, curl, pcntl, ffi, posix
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: nightly-2026-11-11
@@ -343,13 +340,13 @@ jobs:
           test -f "$(php-config --prefix)/lib/libphp.dylib"
       - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
-      - run: python3 scripts/zts-thread-tests.py
+      - run: scripts/php-tool.sh scripts/zts-thread-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
-      - run: python3 scripts/automatic-zts-tests.py
+      - run: scripts/php-tool.sh scripts/automatic-zts-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
-      - run: python3 scripts/engine-metadata-tests.py
+      - run: scripts/php-tool.sh scripts/engine-metadata-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
 
@@ -396,7 +393,7 @@ jobs:
         run: |
           mkdir -p target/zts-sampling-ci
           docker run --rm --network=none -v "$PWD/target/zts-sampling-ci:/receipts" \
-            profiler-sampling-embed python3 scripts/zts-sampling-tests.py --output /receipts
+            profiler-sampling-embed scripts/php-tool.sh scripts/zts-sampling-tests.php --output /receipts
       - name: Make container receipts readable by the artifact uploader
         if: always()
         shell: bash

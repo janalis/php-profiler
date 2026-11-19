@@ -15,8 +15,8 @@ RUN test "$PHP_VERSION" = "$PHP_EXPECTED_VERSION" \
     && php-config --configure-options | grep -- --enable-embed \
     && php-config --configure-options | grep -- --enable-zts
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libclang-dev clang python3 ca-certificates gcc libc6-dev pkg-config binutils \
-    && rm -rf /var/lib/apt/lists/*
+    libclang-dev clang python3 ca-certificates gcc libc6-dev pkg-config binutils libffi-dev \
+    && docker-php-ext-install -j2 ffi pcntl && rm -rf /var/lib/apt/lists/*
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:${PATH}" RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
@@ -26,4 +26,4 @@ RUN cargo build --release --locked -p php-profiler
 ENV PROFILER_EXTENSION=/profiler/target/release/libphp_profiler.so
 # The CI caller must use docker run --network none. No runtime network access
 # is needed by the real PHP jobs, the test observer, or the Rust extension.
-CMD ["python3", "scripts/zts-sampling-tests.py"]
+CMD ["scripts/php-tool.sh", "scripts/zts-sampling-tests.php"]

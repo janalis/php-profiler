@@ -100,16 +100,16 @@ cargo test --workspace
 scripts/php-tests.sh
 scripts/native-fault-tests.sh
 cargo build --release -p php-profiler
-python3 scripts/benchmark.py --extension target/release/libphp_profiler.so
-python3 scripts/performance-evidence.py --extension target/release/libphp_profiler.so --output target/performance
+scripts/php-tool.sh scripts/benchmark.php --extension target/release/libphp_profiler.so
+scripts/php-tool.sh scripts/performance-evidence.php --extension target/release/libphp_profiler.so --output target/performance
 ```
 
 Coverage, Rust/C mutation, schema, ASAN, FPM recovery and true ZTS pthread gates
 are defined in CI. A workflow definition is not a passing remote CI run. Benchmark
-scripts retain separate CPU/wall samples and provenance. `benchmark.py
+scripts retain separate CPU/wall samples and provenance. `benchmark.php
 --warm-disabled` measures disabled execution after an actual stopped/reset capture,
 outside the timed region; allocator and observer caches are also warmed.
-`performance-evidence.py --with-warm-disabled` adds CLI call-heavy and worker cases
+`performance-evidence.php --with-warm-disabled` adds CLI call-heavy and worker cases
 for this state. The Docker CI cells run
 five comparative CLI workloads and FPM request batches in FPM images, with
 runtime networking disabled. Their checks require complete instrumentation captures,

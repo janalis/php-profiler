@@ -70,7 +70,7 @@ hooks:
 	git config --local core.hooksPath .githooks
 bench:
 	cargo build --locked --release -p php-profiler
-	$(PYTHON) scripts/benchmark.py --extension target/release/libphp_profiler.$(if $(filter Darwin,$(shell uname -s)),dylib,so)
+	scripts/php-tool.sh scripts/benchmark.php --extension target/release/libphp_profiler.$(if $(filter Darwin,$(shell uname -s)),dylib,so)
 
 .PHONY: formatter-versions
 formatter-versions:

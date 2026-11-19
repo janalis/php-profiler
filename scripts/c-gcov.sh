@@ -12,7 +12,7 @@ source scripts/link-native-faults.sh
 export PROFILER_EXTENSION="$CARGO_TARGET_DIR/debug/libphp_profiler.so"
 scripts/php-tests.sh
 scripts/native-fault-tests.sh
-PROFILER_LINKED_BAILOUT_FAULT=1 python3 scripts/native-bailout-tests.py
+PROFILER_LINKED_BAILOUT_FAULT=1 scripts/php-tool.sh scripts/native-bailout-tests.php
 php -n -d "extension=$PROFILER_EXTENSION" tests/native/c-boundaries.php
 mkdir -p "$CARGO_TARGET_DIR/reports"
 while IFS= read -r notes; do

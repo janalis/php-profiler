@@ -551,3 +551,31 @@ calling the callback with the slot emptied, the stand-in header
 function that bails out after filling the trigger header, and the FrankenPHP worker integration
 checks (a session started between requests, the start's wall time after an idle wait) must kill
 the new mutants.
+
+## 2026-11-19 test tooling renewal
+
+The C mutation test program and the native fault link moved from Python to PHP. No first-party
+source, compile command, fixture symbol, context or equivalent changed: every source hash,
+coordinate, replacement and proof anchor is the same. `scripts/c-mutation-tests.sh` now runs
+`tests/native/c-boundaries.php` through `scripts/owned-run.php`, which owns the child's process
+group exactly as the inline Python did, and calls `scripts/sampling-controller-tests.php` and
+`scripts/native-bailout-tests.php`. `scripts/link-native-faults.sh` now compiles and
+content-addresses the fault object through `scripts/native-fault-object.php`. The dependency
+hashes renew for the two shell scripts. `scripts/native-bailout-tests.py` is replaced by
+`scripts/native-bailout-tests.php`. `scripts/owned-run.php` and `scripts/native-fault-object.php`
+are added, because they now hold logic that was inline in hashed shell scripts. The NTS and ZTS
+C mutation runs must still classify the same 23 and 22 equivalents and kill every other mutant.
+
+The first CI run of this renewal never finished: both C mutation jobs stopped progressing at about
+mutant 286 for over three hours. Mull activates each mutant through an environment variable named
+after its location, such as `cxx_replace_scalar_call:/source/crates/php-profiler/src/sampling.c:140:5:140:42`.
+That switch was lost twice before reaching the PHP children. `scripts/php-tool.sh` ran under
+`/bin/sh`, which is dash on Debian and drops variable names that are not shell identifiers. PHP's
+`getenv()` without a name also rewrites `.` to `_`. The ported drivers and `scripts/owned-run.php`
+therefore tested the unmutated extension. Mutants such as the removed `pthread_mutex_unlock()` at
+`sampling.c:140` and `sampling.c:468` reached the unbounded shell steps, deadlocked there, and kept
+Mull's output pipe open after its timeout. `scripts/php-tool.sh` now runs under bash, and every
+tool reads the inherited environment through `Process::environment()`. Under that fix, both mutants
+again fail the sampling controller step by its 30-second timeout, as they did under Python. The
+dependency hashes renew for `scripts/native-bailout-tests.php` and `scripts/owned-run.php`, which
+now build the children's environment that way.

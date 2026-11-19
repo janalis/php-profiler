@@ -32,7 +32,9 @@ crates/profiler-core/src/storage.rs
 docs/mutation-equivalence.md
 scripts/c-mutation-tests.sh
 scripts/link-native-faults.sh
-scripts/native-bailout-tests.py
+scripts/native-bailout-tests.php
+scripts/native-fault-object.php
+scripts/owned-run.php
 tests/native/automatic-transports.c
 tests/native/bailout-fault.c
 tests/native/bridge-unit.c

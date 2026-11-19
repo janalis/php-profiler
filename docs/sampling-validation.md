@@ -12,7 +12,7 @@ mkdir -p target/zts-sampling-ci
 docker run --rm --network none \
   -v "$PWD/target/zts-sampling-ci:/receipts" \
   profiler-sampling-embed \
-  python3 scripts/zts-sampling-tests.py --output /receipts
+  scripts/php-tool.sh scripts/zts-sampling-tests.php --output /receipts
 ```
 
 The Dockerfile pins official PHP 8.5.12 ZTS and Rust 1.99.1 manifest digests.
