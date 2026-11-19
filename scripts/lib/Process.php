@@ -67,6 +67,36 @@ final class Process
     }
 
     /**
+     * The process environment exactly as children inherit it. getenv() without a name
+     * cannot be used: it registers each name like a request variable and rewrites "."
+     * and " " to "_", so Mull's mutant switches (named after "file.c:line:column") would
+     * silently disappear from every child built from it. Read on each call, so putenv()
+     * changes are included.
+     *
+     * @return array<string, string>
+     */
+    public static function environment(): array
+    {
+        $process = proc_open(['/usr/bin/env', '-0'], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w']], $pipes);
+        if ($process === false) {
+            throw new RuntimeException('start /usr/bin/env');
+        }
+        $output = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        if (proc_close($process) !== 0 || $output === false) {
+            throw new RuntimeException('read the process environment');
+        }
+        $environment = [];
+        foreach (explode("\0", $output) as $entry) {
+            $separator = strpos($entry, '=');
+            if ($separator !== false && $separator > 0) {
+                $environment[substr($entry, 0, $separator)] = substr($entry, $separator + 1);
+            }
+        }
+        return $environment;
+    }
+
+    /**
      * The current environment for a PHP child under test, with the AddressSanitizer
      * runtime preloaded when PROFILER_ASAN_RUNTIME names one. The tooling's own PHP is
      * never instrumented.
@@ -75,7 +105,7 @@ final class Process
      */
     public static function childEnvironment(): array
     {
-        $environment = getenv();
+        $environment = self::environment();
         if (($environment['PROFILER_ASAN_RUNTIME'] ?? '') !== '') {
             $environment[PHP_OS_FAMILY === 'Darwin' ? 'DYLD_INSERT_LIBRARIES' : 'LD_PRELOAD'] =
                 $environment['PROFILER_ASAN_RUNTIME'];

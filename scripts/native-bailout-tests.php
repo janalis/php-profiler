@@ -49,7 +49,7 @@ if ($darwin) {
 }
 /** The environment for one fault mode: inherited, plus the macOS interposer. */
 $faultEnvironment = static function (array $additions) use ($darwin, $helper): array {
-    $environment = [...getenv(), ...$additions];
+    $environment = [...Process::environment(), ...$additions];
     if ($darwin) {
         $environment['DYLD_INSERT_LIBRARIES'] = Paths::resolve($helper);
     }
@@ -79,7 +79,7 @@ if ($units) {
             $result = $processes->run(
                 [$php, '-n', '-d', 'extension=' . $extension, '-r', 'profiler_test_automatic_bailout();'],
                 30,
-                [...getenv(), 'PROFILER_TEST_AUTOMATIC_BAILOUT' => $mode],
+                [...Process::environment(), 'PROFILER_TEST_AUTOMATIC_BAILOUT' => $mode],
                 capture: true,
             );
         } finally {

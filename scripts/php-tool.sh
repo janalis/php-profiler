@@ -1,8 +1,10 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Runs development tooling on a PHP that loads no host INI, so the profiler
 # under test can never observe, or be measured through, the tooling itself.
 # Shared FFI, pcntl, posix and zlib modules load when installed; code that needs a
 # missing one fails where it uses it.
+# Bash, not /bin/sh: dash drops variables whose names are not shell identifiers, such
+# as the Mull switches that activate each C mutant in the tests this wrapper runs.
 set -eu
 php=${PROFILER_TOOL_PHP:-php}
 loaded=$("$php" -n -m)

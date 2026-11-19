@@ -16,7 +16,7 @@ $configured = (string) getenv('PROFILER_CONTRACT_EXTENSION');
 if ($configured !== '') {
     $extension = Paths::resolve($configured);
 } else {
-    $build = [...getenv(), 'PROFILER_ADAPTER_CONTRACT_TEST' => '1', 'PROFILER_SAMPLING_UNIT' => '1'];
+    $build = [...Process::environment(), 'PROFILER_ADAPTER_CONTRACT_TEST' => '1', 'PROFILER_SAMPLING_UNIT' => '1'];
     $target = ((string) getenv('CARGO_TARGET_DIR') ?: "{$root}/target") . '/adapter-contract';
     $cargo = [(string) getenv('CARGO') ?: 'cargo'];
     if ((string) getenv('PROFILER_COVERAGE_TOOLCHAIN') !== '') {

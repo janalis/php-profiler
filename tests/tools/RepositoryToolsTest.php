@@ -45,7 +45,7 @@ return [
             ]));
             same($accepted, $result['status'] === 0, var_export($title, true) . ':');
         }
-        same(1, Process::run([ROOT . '/scripts/check-pr-title.sh'], array_diff_key(getenv(), [
+        same(1, Process::run([ROOT . '/scripts/check-pr-title.sh'], array_diff_key(Process::environment(), [
             'PR_TITLE' => true,
         ]))['status']);
     },

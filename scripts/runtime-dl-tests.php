@@ -37,5 +37,5 @@ if (
 }
 // The same artifact still loads normally at process startup in a fresh process.
 $code = 'use PhpProfiler\Profiler; $s=Profiler::start(); usleep(1); $s->stop(); if(($s->getReport()["functions"]["usleep"]["calls"]??0)!==1)throw new RuntimeException("permanent startup failed"); echo "permanent startup after rejected dl passed\n";';
-Process::check([$php, '-n', '-d', 'extension=' . $extension, '-r', $code]);
+Process::check([$php, '-n', '-d', 'extension=' . $extension, '-r', $code], timeout: 30);
 echo "runtime dl rejected with native fatal 255 before registration; shutdown PHP remains valid\n";

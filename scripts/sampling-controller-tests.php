@@ -20,7 +20,7 @@ use PhpProfiler\Tooling\SanitizerDiagnostics;
 $root = Paths::resolve(dirname(__DIR__));
 chdir($root);
 $php = Paths::which((string) getenv('PHP') ?: 'php') ?? ((string) getenv('PHP') ?: 'php');
-$environment = getenv();
+$environment = Process::environment();
 $configured = $environment['PROFILER_SAMPLING_EXTENSION'] ?? '';
 if ($configured !== '') {
     $extension = Paths::resolve($configured);

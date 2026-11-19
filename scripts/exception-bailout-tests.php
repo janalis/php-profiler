@@ -18,7 +18,10 @@ if (PHP_OS_FAMILY !== 'Darwin') {
 }
 $fixture = ExceptionFixture::path();
 $directory = ExceptionFixture::temporaryDirectory('profiler-exception-bailout-');
-$environment = [...getenv(), ...ExceptionFixture::interposer('tests/native/exception-bailout.c', $directory)];
+$environment = [
+    ...Process::environment(),
+    ...ExceptionFixture::interposer('tests/native/exception-bailout.c', $directory),
+];
 foreach ([6, 7] as $case) {
     $countsPath = "{$directory}/counts-{$case}.json";
     $result = Process::run(

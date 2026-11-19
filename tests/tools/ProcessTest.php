@@ -54,4 +54,58 @@ return [
     'check output refuses a failed command' => static function (): void {
         same(9, throws(ProcessFailedStatus::class, static fn() => Process::output(['sh', '-c', 'exit 9']))->status);
     },
+    'environment keeps names that getenv() would rewrite' => static function (): void {
+        // Mull switches a mutant on with a variable named after its source location.
+        // The probes print the environment without a shell: dash itself drops such names.
+        $name = 'cxx_mutant:/source/src/sampling.c:140:5 x';
+        $inherited = static fn(string $output): bool => in_array($name . '=1', explode("\n", $output), true);
+        $launched = Process::run([
+            '/usr/bin/env',
+            $name . '=1',
+            ROOT . '/scripts/php-tool.sh',
+            '-r',
+            sprintf(
+                'require %s; $e = PhpProfiler\\Tooling\\Process::environment(); echo $e[%s] ?? "missing", "\n", PhpProfiler\\Tooling\\Process::run(["/usr/bin/env"], $e)["stdout"];',
+                var_export(ROOT . '/scripts/lib/Process.php', true),
+                var_export($name, true),
+            ),
+        ]);
+        same('1', strstr($launched['stdout'], "\n", true), 'environment() lost the switch: ' . $launched['stderr']);
+        same(true, $inherited($launched['stdout']), 'a child built from environment() lost the switch');
+        $owned = Process::run([
+            '/usr/bin/env',
+            $name . '=1',
+            ROOT . '/scripts/php-tool.sh',
+            ROOT . '/scripts/owned-run.php',
+            '5',
+            '/usr/bin/env',
+        ]);
+        same(0, $owned['status'], $owned['stderr']);
+        same(true, $inherited($owned['stdout']), 'owned run dropped the mutant switch');
+    },
+    'tooling never reads the whole environment through getenv()' => static function (): void {
+        $offenders = [];
+        $files = [
+            ...glob(ROOT . '/scripts/*.php'),
+            ...glob(ROOT . '/scripts/lib/*.php'),
+            ...glob(ROOT . '/tests/tools/*.php'),
+        ];
+        foreach ($files as $file) {
+            $ignored = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT];
+            $tokens = array_values(array_filter(
+                token_get_all((string) file_get_contents($file)),
+                static fn(mixed $token): bool => !is_array($token) || !in_array($token[0], $ignored, true),
+            ));
+            foreach ($tokens as $index => $token) {
+                $call =
+                    is_array($token)
+                    && in_array($token[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true)
+                    && strtolower(ltrim($token[1], '\\')) === 'getenv';
+                if ($call && ($tokens[$index + 1] ?? null) === '(' && ($tokens[$index + 2] ?? null) === ')') {
+                    $offenders[] = basename($file) . ':' . $token[2];
+                }
+            }
+        }
+        same([], $offenders, 'use Process::environment():');
+    },
 ];

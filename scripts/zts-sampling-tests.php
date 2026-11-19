@@ -8,6 +8,7 @@ require_once __DIR__ . '/lib/AtforkWrapper.php';
 require_once __DIR__ . '/lib/Fail.php';
 require_once __DIR__ . '/lib/Json.php';
 require_once __DIR__ . '/lib/Paths.php';
+require_once __DIR__ . '/lib/Process.php';
 require_once __DIR__ . '/lib/ProcessGroups.php';
 require_once __DIR__ . '/lib/Shlex.php';
 require_once __DIR__ . '/lib/ValidationInputs.php';
@@ -16,6 +17,7 @@ use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\AtforkWrapper;
 use PhpProfiler\Tooling\Json;
 use PhpProfiler\Tooling\Paths;
+use PhpProfiler\Tooling\Process;
 use PhpProfiler\Tooling\ProcessGroups;
 use PhpProfiler\Tooling\Shlex;
 use PhpProfiler\Tooling\ValidationInputs;
@@ -135,7 +137,7 @@ try {
         $ini,
         "extension=\"{$escaped}\"\nhtml_errors=0\ndisplay_errors=stderr\nlog_errors=0\nmax_execution_time=0\n",
     );
-    $environment = getenv();
+    $environment = Process::environment();
     $environment['PHP_INI_SCAN_DIR'] = '';
     $environment['LD_PRELOAD'] =
         $observer . (($environment['LD_PRELOAD'] ?? '') !== '' ? ':' . $environment['LD_PRELOAD'] : '');

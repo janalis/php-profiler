@@ -20,7 +20,7 @@ if (PHP_OS_FAMILY !== 'Darwin') {
 }
 $fixture = ExceptionFixture::path();
 $directory = ExceptionFixture::temporaryDirectory('profiler-clone-ownership-');
-$environment = [...getenv(), ...ExceptionFixture::interposer('tests/native/clone-bailout.c', $directory)];
+$environment = [...Process::environment(), ...ExceptionFixture::interposer('tests/native/clone-bailout.c', $directory)];
 $countsPath = "{$directory}/counts.json";
 $result = Process::run(
     [$php, '-n', '-d', 'extension=' . $fixture, 'tests/native/clone-bailout.php', $countsPath],

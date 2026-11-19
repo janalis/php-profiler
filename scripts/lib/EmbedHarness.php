@@ -39,7 +39,7 @@ final class EmbedHarness
     /** Runs the harness with no host INI scan directory, failing on a non-zero status. */
     public static function run(array $command): void
     {
-        $environment = getenv();
+        $environment = Process::environment();
         $environment['PHP_INI_SCAN_DIR'] = '';
         $result = Process::run($command, $environment, timeout: 120);
         fwrite(STDOUT, $result['stdout']);

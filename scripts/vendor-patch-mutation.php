@@ -85,7 +85,7 @@ $output = Paths::resolve((string) ($options['output-dir'] ?? "{$root}/target/ven
 if (!is_dir($output) && !mkdir($output, 0o777, true)) {
     ExceptionFixture::fail('create ' . $output);
 }
-$environment = [...getenv(), 'PHP' => $php, 'PHP_CONFIG' => $phpConfig];
+$environment = [...Process::environment(), 'PHP' => $php, 'PHP_CONFIG' => $phpConfig];
 // Always rebuild our copied fixture; never accidentally reuse a caller's DSO.
 unset(
     $environment['PROFILER_FIXTURE_EXTENSION'],

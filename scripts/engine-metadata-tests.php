@@ -43,7 +43,7 @@ Process::check([
     '-o',
     $executable,
 ]);
-$environment = getenv();
+$environment = Process::environment();
 $environment['PHP_INI_SCAN_DIR'] = '';
 $result = Process::run([$executable, "{$directory}/php.ini"], $environment, timeout: 30);
 fwrite(STDOUT, $result['stdout']);

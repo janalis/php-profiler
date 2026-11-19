@@ -29,5 +29,5 @@ function writeFile(string $path, string $contents, int $mode = 0o644): void
 /** @param array<string, string> $environment */
 function withEnvironment(array $environment): array
 {
-    return array_merge(getenv(), $environment);
+    return array_merge(\PhpProfiler\Tooling\Process::environment(), $environment);
 }

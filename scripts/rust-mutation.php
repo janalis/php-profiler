@@ -51,7 +51,7 @@ chdir($root);
 // Standalone Rust test executables do not host Zend. Only the native test
 // driver's separate cdylib build enables private Zend-linked contracts.
 $privateFlags = ['PROFILER_ADAPTER_CONTRACT_TEST', 'PROFILER_C_UNIT_BOUNDARIES', 'PROFILER_SAMPLING_UNIT'];
-$environment = array_diff_key(getenv(), array_flip($privateFlags));
+$environment = array_diff_key(Process::environment(), array_flip($privateFlags));
 $environment['CARGO_INCREMENTAL'] = '0';
 $parent = Paths::resolve((string) ($options['output'] ?? "{$root}/target/rust-mutation"));
 if (!is_dir($parent) && !mkdir($parent, 0o777, true)) {

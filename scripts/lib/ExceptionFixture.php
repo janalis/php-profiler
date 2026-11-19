@@ -32,7 +32,7 @@ final class ExceptionFixture
                 '--target-dir',
                 $target,
             ],
-            getenv(),
+            Process::environment(),
             $root,
         );
         $suffix = PHP_OS_FAMILY === 'Darwin' ? 'dylib' : 'so';
