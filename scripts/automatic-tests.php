@@ -149,7 +149,7 @@ function builtInServerChecks(string $output): void
                 }
             }
         } finally {
-            $log = $server->stop(SIGINT);
+            $log = $server->stop(SIGINT, mustExit: true);
         }
         SanitizerDiagnostics::reject($log, 'automatic built-in server');
         check(reports($output) === [], bin2hex($secret));
@@ -663,7 +663,7 @@ try {
     }
     check(report($path)['functions']['http_leaf']['calls'] === 1);
 } finally {
-    $log = $server->stop(SIGINT);
+    $log = $server->stop(SIGINT, mustExit: true);
 }
 SanitizerDiagnostics::reject($log, 'automatic HTTP server');
 echo "automatic built-in HTTP server header trigger passed\n";

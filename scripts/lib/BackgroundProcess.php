@@ -64,9 +64,13 @@ final class BackgroundProcess
         throw new RuntimeException("{$what} startup timed out");
     }
 
-    /** Sends $signal, waits up to 10 seconds, then kills; returns the error log. */
-    public function stop(int $signal): string
+    /**
+     * Sends $signal, waits up to 10 seconds, then kills; returns the error log. With
+     * $mustExit, a process that had to be killed is a failure, reported with its log.
+     */
+    public function stop(int $signal, bool $mustExit = false): string
     {
+        $killed = false;
         if ($this->running()) {
             proc_terminate($this->process, $signal);
             $deadline = hrtime(true) + 10_000_000_000;
@@ -74,6 +78,7 @@ final class BackgroundProcess
                 usleep(10_000);
             }
             if ($this->running()) {
+                $killed = true;
                 proc_terminate($this->process, SIGKILL);
                 while ($this->running()) {
                     usleep(10_000);
@@ -84,6 +89,9 @@ final class BackgroundProcess
         $log = $this->log();
         if ($this->temporary) {
             @unlink($this->errors);
+        }
+        if ($killed && $mustExit) {
+            throw new RuntimeException("process did not exit within 10 seconds of signal {$signal}:\n{$log}");
         }
         return $log;
     }

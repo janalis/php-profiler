@@ -130,7 +130,12 @@ final class FpmServer
             }
             $read = array_column($open, 'socket');
             $write = $except = null;
-            if (stream_select($read, $write, $except, (int) $timeout, (int) (fmod($timeout, 1) * 1e6)) === 0) {
+            // A failed select is a failure, like Python's socket timeout, never a retry.
+            $ready = stream_select($read, $write, $except, (int) $timeout, (int) (fmod($timeout, 1) * 1e6));
+            if ($ready === false) {
+                throw new RuntimeException('wait for FastCGI responses');
+            }
+            if ($ready === 0) {
                 throw new RuntimeException('FastCGI response timed out');
             }
             foreach ($open as $index => &$connection) {
@@ -164,7 +169,7 @@ final class FpmServer
         mkdir($this->directory, 0o700) || throw new RuntimeException('create ' . $this->directory);
         if ($this->cgiSettings !== null) {
             $this->address = $this->directory . '/cgi.sock';
-            $this->launch(['php-cgi', ...$this->cgiSettings, '-b', $this->address], 'php-cgi');
+            $this->launch(['php-cgi', ...$this->cgiSettings, '-b', $this->address], 'php-cgi', 200);
             return;
         }
         $this->address = $this->directory . '/fpm.sock';
@@ -189,11 +194,15 @@ final class FpmServer
         foreach ($this->iniSettings as $name => $value) {
             array_push($command, '-d', "{$name}={$value}");
         }
-        $this->launch($command, 'FPM');
+        $this->launch($command, 'FPM', 100);
     }
 
-    /** @param list<string> $command */
-    private function launch(array $command, string $what): void
+    /**
+     * Starts the server and waits for its socket in 50 ms steps, as many as $attempts.
+     *
+     * @param list<string> $command
+     */
+    private function launch(array $command, string $what, int $attempts): void
     {
         $descriptors = [
             0 => ['file', '/dev/null', 'r'],
@@ -203,7 +212,7 @@ final class FpmServer
         $this->process = proc_open($command, $descriptors, $pipes, null, $this->environment)
         ?: throw new RuntimeException('start ' . $command[0]);
         try {
-            for ($attempt = 0; $attempt < 100; $attempt++) {
+            for ($attempt = 0; $attempt < $attempts; $attempt++) {
                 if (file_exists($this->address)) {
                     return;
                 }

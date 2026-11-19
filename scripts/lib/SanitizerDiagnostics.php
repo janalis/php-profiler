@@ -31,7 +31,15 @@ final class SanitizerDiagnostics
             . '|'
             . self::PREFIX
             . 'ASan runtime does not come first\b/im';
-        if (preg_match($failure, (string) preg_replace(self::ANSI_CSI, '', $output))) {
+        // A PCRE failure, such as an exhausted backtrack limit on a huge log, is never clean.
+        $plain = preg_replace(self::ANSI_CSI, '', $output);
+        $matched = $plain === null ? false : preg_match($failure, $plain);
+        if ($matched === false) {
+            throw new RuntimeException(
+                "cannot scan {$context} output for sanitizer failures: " . preg_last_error_msg(),
+            );
+        }
+        if ($matched === 1) {
             throw new RuntimeException("Sanitizer failure during {$context}:\n{$output}");
         }
     }

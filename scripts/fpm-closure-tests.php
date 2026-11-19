@@ -70,11 +70,17 @@ $requests = array_map(
     static fn(int $index): array => ['tests/fpm/closure-request.php', ['PROFILE_TEST_TOKEN' => (string) $index]],
     range(0, 31),
 );
-$raw = (new FpmServer(
+$server = new FpmServer(
     (string) getenv('PROFILER_EXTENSION') ?: throw new RuntimeException('PROFILER_EXTENSION is required'),
     $settings,
     $workers,
-))->serve(static fn(FpmServer $server): array => $server->concurrent($requests, 8));
+);
+$raw = $server->serve(static fn(FpmServer $server): array => $server->concurrent($requests, 8));
+// Every check below runs after FPM stopped: a failure still carries its master's log.
+set_exception_handler(static function (Throwable $failure) use ($server): never {
+    fwrite(STDERR, $failure . "\nFPM master diagnostics:\n" . $server->lastLog . "\n");
+    exit(1);
+});
 $results = [];
 foreach ($raw as $index => $response) {
     $payload = FpmServer::decode($response);

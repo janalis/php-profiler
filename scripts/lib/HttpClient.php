@@ -51,15 +51,19 @@ final class HttpClient
         return ['status' => (int) $status[1], 'headers' => $parsed, 'body' => $body];
     }
 
-    /** The first value of a header, compared case-insensitively, like email.message.get(). */
+    /**
+     * A header's values, compared case-insensitively and joined with ", " when repeated, like
+     * http.client's getheader(): a duplicated header can never pass as a single value.
+     */
     public static function header(array $headers, string $name): ?string
     {
+        $values = [];
         foreach ($headers as [$candidate, $value]) {
             if (strcasecmp($candidate, $name) === 0) {
-                return $value;
+                $values[] = $value;
             }
         }
-        return null;
+        return $values === [] ? null : implode(', ', $values);
     }
 
     private static function dechunk(string $body): string
