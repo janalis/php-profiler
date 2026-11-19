@@ -50,7 +50,7 @@ measured macOS arm64 PHP 8.5.12 ZTS release build, disassembly confirms the end
 callback resolves one TLS address instead of two. No Zend registration or cache
 behavior changes.
 
-`python3 scripts/observer-overhead.py --baseline /path/baseline.dylib --candidate
+`scripts/php-tool.sh scripts/observer-overhead.php --baseline /path/baseline.dylib --candidate
 /path/candidate.dylib` records randomized paired absent/baseline/candidate runs,
 checks the workload checksum, and retains binary hashes and every sample. The
 initial isolated source trees differed only in `bridge.c`. Raw local artifacts

@@ -206,7 +206,7 @@ jobs:
           if [[ '${{ matrix.sapi }}' == fpm ]]; then fpm_args=(--fpm); fi
           docker run --rm --network=none -v "$PWD/target/performance:/evidence" \
             'local-php-profiler:${{ matrix.php }}-${{ matrix.sapi }}' \
-            python3 scripts/performance-evidence.py --extension /profiler/target/release/libphp_profiler.so \
+            scripts/php-tool.sh scripts/performance-evidence.php --extension /profiler/target/release/libphp_profiler.so \
             --output /evidence --with-sampling --with-warm-disabled "${fpm_args[@]}"
       - name: Make container receipts readable by the artifact uploader
         if: always()

@@ -21,7 +21,7 @@ scripts/php-tool.sh scripts/source-snapshot.php "$snapshot" "$compatibility/sour
 run_fpm_suite() {
   docker run --rm "$image" python3 scripts/automatic-tests.py --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
   docker run --rm "$image" scripts/php-tool.sh scripts/fpm-test.php | tee "$compatibility/${version}-${sapi}-fpm.log"
-  docker run --rm "$image" python3 scripts/sampling-jit-tests.py --fpm \
+  docker run --rm "$image" scripts/php-tool.sh scripts/sampling-jit-tests.php --fpm \
     --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts nts \
     | tee "$compatibility/${version}-${sapi}-sampling-jit-reuse.json"
   docker run --rm "$image" scripts/php-tool.sh scripts/fpm-recovery-test.php | tee "$compatibility/${version}-${sapi}-fpm-recovery.json"
@@ -76,7 +76,7 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
       docker run --rm "$image" python3 scripts/jit-megamorphic-tests.py \
         --extension /profiler/target/release/libphp_profiler.so \
         | tee "$compatibility/${version}-${sapi}-megamorphic-jit.json"
-      docker run --rm "$image" python3 scripts/sampling-jit-tests.py \
+      docker run --rm "$image" scripts/php-tool.sh scripts/sampling-jit-tests.php \
         --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts "$expected_zts" \
         | tee "$compatibility/${version}-${sapi}-sampling-jit-cli-companion.json"
     fi

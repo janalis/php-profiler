@@ -61,15 +61,7 @@ if (!is_dir($parent) && !mkdir($parent, 0o777, true)) {
 do {
     $run = $parent . '/run-' . bin2hex(random_bytes(4));
 } while (!@mkdir($run, 0o700));
-$pathOrdered = static function (array $snapshot): array {
-    // Python's snapshot dict follows sorted() over pathlib paths.
-    $ordered = [];
-    foreach (Paths::sort(array_map(strval(...), array_keys($snapshot))) as $name) {
-        $ordered[$name] = $snapshot[$name];
-    }
-    return $ordered;
-};
-$before = $pathOrdered(ValidationInputs::snapshot($root));
+$before = ValidationInputs::inPathOrder(ValidationInputs::snapshot($root));
 file_put_contents("{$run}/source-before.json", Json::encode((object) $before, indent: 2, sortKeys: false) . "\n");
 $metadata = json_decode(
     Process::output(['cargo', 'metadata', '--format-version', '1', '--no-deps'], $environment),
@@ -262,7 +254,7 @@ try {
     fwrite(STDERR, $failure->getMessage() . "\n");
     $status = 1;
 } finally {
-    $after = $pathOrdered(ValidationInputs::snapshot($root));
+    $after = ValidationInputs::inPathOrder(ValidationInputs::snapshot($root));
     file_put_contents("{$run}/source-after.json", Json::encode((object) $after, indent: 2, sortKeys: false) . "\n");
     $changed = [];
     foreach (array_keys($before + $after) as $key) {

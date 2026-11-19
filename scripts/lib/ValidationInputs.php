@@ -9,6 +9,8 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SplFileInfo;
 
+require_once __DIR__ . '/Paths.php';
+
 /** Fingerprints validation inputs without a Git dependency; must match scripts/validation_inputs.py. */
 final class ValidationInputs
 {
@@ -89,6 +91,22 @@ final class ValidationInputs
         }
         ksort($hashes, SORT_STRING);
         return $hashes;
+    }
+
+    /**
+     * The snapshot in the order Python's dict kept it: sorted() over pathlib paths,
+     * component by component.
+     *
+     * @param array<string, string> $snapshot
+     * @return array<string, string>
+     */
+    public static function inPathOrder(array $snapshot): array
+    {
+        $ordered = [];
+        foreach (Paths::sort(array_map(strval(...), array_keys($snapshot))) as $name) {
+            $ordered[$name] = $snapshot[$name];
+        }
+        return $ordered;
     }
 
     /**
