@@ -311,7 +311,7 @@
     "crates/php-profiler/Cargo.toml": "ce7e3aff7a61e041e96272375b5e1067015f5ef376a964bca6f2aedc48e56e70",
     "crates/php-profiler/build.rs": "00165c497fd772e9612c31e718d4f0823c09bdf609b1999301fce06b3068bee2",
     "crates/php-profiler/src/automatic.rs": "38271a4176586417f5185d66722521a3aabac9620776257d7555c4b6b32758cf",
-    "crates/php-profiler/src/bridge.c": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+    "crates/php-profiler/src/bridge.c": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
     "crates/php-profiler/src/lib.rs": "1bca4d0dc3eda7e071545624594fdf37b0cccd28b5e019c9d2a8e5749b342ab8",
     "crates/php-profiler/src/sampling.c": "57cb579066658f5a1c523459a3bd30adb8850b29ae178dc31981dc82bb956fcc",
     "crates/php-profiler/src/sampling.rs": "48a46132c3138c7d127c2df01ade8398de56950ffc0834cb22df088be4d22fa0",
@@ -323,15 +323,15 @@
     "crates/profiler-core/src/sampling.rs": "38f447e02e78151ded334c16804d12b85ddfa145fb5468e64a1adbe7b24e6a7b",
     "crates/profiler-core/src/serialization.rs": "cabe9fabdaf9ee2386d4222abe34c2387d8fae92a5e71ca65a3d2f2739336b8f",
     "crates/profiler-core/src/storage.rs": "6b404604930949fe9e0537670fef52e5ee8b69c76796c420aeb8e2e79526eee3",
-    "docs/mutation-equivalence.md": "c27eb32514c487b5b34b9450aff760b30dd08bedb85fca7e067ffd0e0225fe65",
+    "docs/mutation-equivalence.md": "ad48efcc8147375a4b4a1e373cb4b2fbe073c538637fcbb3f93f5a0e3acfbc61",
     "scripts/c-mutation-tests.sh": "fcce09b847b50ba000f7eeafed3cb3ec7953c21a407a638b7304def38d779b1e",
     "scripts/link-native-faults.sh": "8884e92ebca1ebcda81700fb9eaa91d15bd8e9f50f74055b5b2f71905981efa2",
-    "scripts/native-bailout-tests.php": "ed0767d7f317ce56ad281a1d94dc088a4c908d4afafa78006a69ad918d428270",
+    "scripts/native-bailout-tests.php": "27dd5f5ffa62388d3c3c52740d2c9de013605da740c5a249b3e9d098c47e3bde",
     "scripts/native-fault-object.php": "8217e9761d98a518f7732bf0aa1fc0ab89d5918340a413031d61cf2837ec95af",
     "scripts/owned-run.php": "f24c8b688916214d8f00d70cf88996c0a98610c228475c9cfd64765e3187b24a",
     "tests/native/automatic-transports.c": "d3266ce65aee892fb7d4266c095e147f94003064067b8a4e0a7f748abb4bd559",
     "tests/native/bailout-fault.c": "cdd6287da2294ea6de2222d68a852579120290914689e39e8557294adb202e16",
-    "tests/native/bridge-unit.c": "5bcda737a1455d17f0ae45b29b8cf9ac2308b2e1dfc3cefb69caefaa4072a637",
+    "tests/native/bridge-unit.c": "eaecc756b89bea0644bc2dae1029ce62681a3fe24e63311693d4444d6737038c",
     "tests/native/c-boundaries.php": "f6d339e7a6d240a368ba3f471ed9faa892b17c5d7ae6703f216084ef5ef70ef5",
     "tests/native/frames-native.c": "9bd4b5ee9163bc3bb3ce41e9e9487b02f9737bb35734975b5eff9c2c971e3aff",
     "tests/native/sampling-lifecycle-native.c": "83acaf91b44d5e549b6f17fcd8ab40289bee30acef0f5b36dfe662ec7312d40a",
@@ -344,7 +344,7 @@
   "equivalents": [
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -365,7 +365,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -386,7 +386,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -407,7 +407,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -428,7 +428,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {
@@ -449,7 +449,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_init_const",
       "location": {
         "start": {
@@ -470,7 +470,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_init_const",
       "location": {
         "start": {
@@ -491,7 +491,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_remove_void_call",
       "location": {
         "start": {
@@ -811,7 +811,7 @@
     },
     {
       "source": "crates/php-profiler/src/bridge.c",
-      "source_sha256": "02cc0e21dcda163d8bb1bd5d06b6c56894e65185baa881b1ec7dd3f7efbf0e39",
+      "source_sha256": "8fbd0757c4d890d3d6e7a2fffe3fd28fd2de64cdd24cc3b156d741086447b975",
       "mutatorName": "cxx_assign_const",
       "location": {
         "start": {

@@ -73,6 +73,7 @@ if ($units) {
         'header',
         'worker',
         'worker-start',
+        'worker-materialize',
     ] as $mode) {
         $processes = new ProcessGroups();
         try {

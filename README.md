@@ -173,7 +173,10 @@ its internal `PhpProfiler\Internal\frankenphp_request()` function, which appears
 as that callback. In `always` mode, a worker's start, up to its first `frankenphp_handle_request()` call, writes
 one report too. Sessions still running when a worker request ends are completed with it, as at the end of any
 request; sessions started between requests are completed when the worker next calls
-`frankenphp_handle_request()`, before it waits, and automatic capture skips code between requests. A value inherited from the PHP
+`frankenphp_handle_request()`, before it waits, and automatic capture skips code between requests. Outside worker mode,
+where FrankenPHP refuses `frankenphp_handle_request()`, the call leaves the current request's capture running on
+FrankenPHP 1.13.4+; earlier versions cannot tell the extension whether a script is a worker, so there the refused
+call still ends the capture. A value inherited from the PHP
 process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
 Unit, FrankenPHP 1.1+ and LiteSpeed (in server mode) read request headers only, so the process environment
 (or a FrankenPHP `env` setting) does not affect them while they serve requests; the CLI never reads a trigger, nor do these
