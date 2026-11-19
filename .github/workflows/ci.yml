@@ -97,12 +97,9 @@ jobs:
       - run: scripts/php-tool.sh scripts/test-vendored-exception.php
       - run: scripts/php-tool.sh scripts/clone-bailout-tests.php
       - run: scripts/php-tool.sh scripts/exception-bailout-tests.php
-      - run: python3 scripts/adapter-contract-tests.py
+      - run: scripts/php-tool.sh scripts/adapter-contract-tests.php
       - name: Validate real reports against the published schema
-        run: |
-          python3 -m venv target/dev-venv
-          target/dev-venv/bin/pip install -r requirements-dev.txt
-          PROFILER_EXTENSION="$PWD/target/debug/libphp_profiler.so" target/dev-venv/bin/python scripts/schema-tests.py
+        run: PROFILER_EXTENSION="$PWD/target/debug/libphp_profiler.so" scripts/php-tool.sh scripts/schema-tests.php
   coverage:
     needs: source-pin
     runs-on: ubuntu-24.04
@@ -343,13 +340,13 @@ jobs:
           test -f "$(php-config --prefix)/lib/libphp.dylib"
       - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
-      - run: python3 scripts/zts-thread-tests.py
+      - run: scripts/php-tool.sh scripts/zts-thread-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
-      - run: python3 scripts/automatic-zts-tests.py
+      - run: scripts/php-tool.sh scripts/automatic-zts-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
-      - run: python3 scripts/engine-metadata-tests.py
+      - run: scripts/php-tool.sh scripts/engine-metadata-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
 

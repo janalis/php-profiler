@@ -67,6 +67,23 @@ final class Process
     }
 
     /**
+     * The current environment for a PHP child under test, with the AddressSanitizer
+     * runtime preloaded when PROFILER_ASAN_RUNTIME names one. The tooling's own PHP is
+     * never instrumented.
+     *
+     * @return array<string, string>
+     */
+    public static function childEnvironment(): array
+    {
+        $environment = getenv();
+        if (($environment['PROFILER_ASAN_RUNTIME'] ?? '') !== '') {
+            $environment[PHP_OS_FAMILY === 'Darwin' ? 'DYLD_INSERT_LIBRARIES' : 'LD_PRELOAD'] =
+                $environment['PROFILER_ASAN_RUNTIME'];
+        }
+        return $environment;
+    }
+
+    /**
      * Like subprocess.check_output(): the standard output of a successful command.
      *
      * @param list<string> $command
@@ -87,13 +104,34 @@ final class Process
      * @param list<string> $command
      * @param array<string, string>|null $environment
      */
-    public static function check(array $command, ?array $environment = null, ?string $directory = null): void
-    {
-        $process = proc_open($command, [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes, $directory, $environment);
+    public static function check(
+        array $command,
+        ?array $environment = null,
+        ?string $directory = null,
+        ?float $timeout = null,
+    ): void {
+        // Unspecified descriptors are inherited as they are. Passing the STDOUT and STDERR
+        // constants instead gives the child separate file offsets, so a redirected log
+        // would be overwritten.
+        $process = proc_open($command, [], $pipes, $directory, $environment);
         if ($process === false) {
             throw new RuntimeException('start ' . $command[0]);
         }
-        $status = proc_close($process);
+        $deadline = $timeout === null ? null : hrtime(true) + (int) ($timeout * 1e9);
+        while (true) {
+            $state = proc_get_status($process);
+            if (!$state['running']) {
+                $status = $state['signaled'] ? -$state['termsig'] : $state['exitcode'];
+                break;
+            }
+            if ($deadline !== null && hrtime(true) >= $deadline) {
+                proc_terminate($process, SIGKILL);
+                proc_close($process);
+                throw new RuntimeException($command[0] . " timed out after {$timeout} seconds");
+            }
+            usleep(2000);
+        }
+        proc_close($process);
         if ($status !== 0) {
             throw new ProcessFailedStatus($command, $status, '');
         }

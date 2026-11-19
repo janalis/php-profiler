@@ -46,8 +46,8 @@ fn real_zend_runtime() {
         .status()
         .expect("launch OS clock fault fixtures");
     assert!(faults.success(), "native clock fault fixtures must pass");
-    let contracts = Command::new("python3")
-        .arg("scripts/adapter-contract-tests.py")
+    let contracts = Command::new(root.join("scripts/php-tool.sh"))
+        .arg("scripts/adapter-contract-tests.php")
         .env("PROFILER_CONTRACT_EXTENSION", &extension)
         .env("PROFILER_C_UNIT_BOUNDARIES", "1")
         .current_dir(&root)

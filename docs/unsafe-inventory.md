@@ -33,7 +33,7 @@ The dependency's C allocation shims directly call Zend allocation routines. A su
 
 On the local macOS arm64 / PHP 8.5.12 ZTS debug extension, the following checks were rerun during this inventory review:
 
-- `scripts/test-report-oom.py`: both JSON-string and structured-array report conversion exhausted the configured Zend memory limit, exited fatally with code 255, and produced neither PHP catch nor continuation markers.
+- `scripts/test-report-oom.php`: both JSON-string and structured-array report conversion exhausted the configured Zend memory limit, exited fatally with code 255, and produced neither PHP catch nor continuation markers.
 - `tests/php/generated_symbols.php`: distinct closure sites and anonymous-class methods retained distinct opaque labels; the report omitted the fixture's source path.
 - A manual `json_last_error()` probe retained error code 4 across a successful structured `getReport()` call.
 

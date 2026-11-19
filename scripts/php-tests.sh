@@ -36,11 +36,11 @@ for pid in "${pids[@]}"; do
   wait "$pid" || failed=1
 done
 if [[ "$failed" != 0 ]]; then exit "$failed"; fi
-PROFILER_EXTENSION="$extension" python3 scripts/termination-tests.py
+PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/termination-tests.php
 
-PROFILER_EXTENSION="$extension" python3 scripts/test-report-oom.py
-PROFILER_EXTENSION="$extension" python3 scripts/basedir-tests.py
-PROFILER_EXTENSION="$extension" python3 scripts/metadata-tests.py
+PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/test-report-oom.php
+PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/basedir-tests.php
+PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/metadata-tests.php
 "${php_command[@]}" -n -d "extension=$extension" tests/native/session-handle-safety.php
 "${php_command[@]}" -n -d "extension=$extension" tests/native/runtime-state.php
 

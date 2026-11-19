@@ -35,7 +35,7 @@ That distinction concerns this specific defect, not universal PHP 8.3 JIT safety
 
 ## Dedicated runtime regression
 
-`scripts/jit-megamorphic-tests.py` runs one hot callsite over five distinct final
+`scripts/jit-megamorphic-tests.php` runs one hot callsite over five distinct final
 receiver classes with a two-type polymorphic limit. It requires cached source,
 actual tracing JIT, accepted threshold configuration and code-buffer consumption
 measured immediately after the hot loop. Captured calls must equal the exact
@@ -71,7 +71,7 @@ actual FPM workers have separate preload/JIT/concurrency receipts in that matrix
 
 ```sh
 PROFILER_EXTENSION=/absolute/path/libphp_profiler.so \
-python3 scripts/jit-megamorphic-tests.py --out /tmp/jit-megamorphic.json
+scripts/php-tool.sh scripts/jit-megamorphic-tests.php --out /tmp/jit-megamorphic.json
 ```
 
 The runner detects built-in OPcache or loads the local `opcache` extension. Use

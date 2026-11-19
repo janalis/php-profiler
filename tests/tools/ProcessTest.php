@@ -25,6 +25,32 @@ return [
         same([null, 'partial'], [$result['status'], $result['stdout']]);
         same(true, (hrtime(true) - $started) < 5_000_000_000);
     },
+    'check enforces its timeout and status' => static function (): void {
+        throws(RuntimeException::class, static fn() => Process::check(['sleep', '30'], timeout: 0.3));
+        same(4, throws(ProcessFailedStatus::class, static fn() => Process::check(['sh', '-c', 'exit 4']))->status);
+        Process::check(['true']);
+    },
+    'checked children append to a redirected log instead of overwriting it' => static function (): void {
+        $directory = temporaryDirectory();
+        writeFile(
+            "{$directory}/driver.php",
+            '<?php require '
+            . var_export(ROOT . '/scripts/lib/Process.php', true)
+            . '; echo "one\\n"; '
+            . 'PhpProfiler\\Tooling\\Process::check(["sh", "-c", "echo two; echo three >&2"]); fwrite(STDERR, "four\\n"); '
+            . 'PhpProfiler\\Tooling\\Process::check(["sh", "-c", "echo five"]); echo "six\\n";',
+        );
+        $result = Process::run([
+            'sh',
+            '-c',
+            'php -n "$1" > "$2" 2>&1',
+            'driver',
+            "{$directory}/driver.php",
+            "{$directory}/log",
+        ]);
+        same(0, $result['status'], $result['stderr']);
+        same("one\ntwo\nthree\nfour\nfive\nsix\n", file_get_contents("{$directory}/log"));
+    },
     'check output refuses a failed command' => static function (): void {
         same(9, throws(ProcessFailedStatus::class, static fn() => Process::output(['sh', '-c', 'exit 9']))->status);
     },

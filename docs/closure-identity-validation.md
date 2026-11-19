@@ -8,7 +8,7 @@ failure contract in [the unsafe inventory](unsafe-inventory.md#closure-cache-ide
 
 ## Concurrent ZTS requests with real shared code
 
-`scripts/zts-thread-tests.py` compiles `tests/native/zts_threads.c` against a real
+`scripts/zts-thread-tests.php` compiles `tests/native/zts_threads.c` against a real
 ZTS embed library. Four pthreads each execute 20 complete PHP requests through
 the public embed/TSRM lifecycle. They include the same real PHP fixture file;
 OPcache mode warms that file before starting the threads. The SAPI name remains
@@ -83,7 +83,7 @@ For a matching ZTS embed library and normal runtime extension:
 
 ```sh
 PROFILER_EXTENSION=/absolute/path/libphp_profiler.dylib \
-PROFILER_REQUIRE_EMBED_OPCACHE=1 python3 scripts/zts-thread-tests.py
+PROFILER_REQUIRE_EMBED_OPCACHE=1 scripts/php-tool.sh scripts/zts-thread-tests.php
 ```
 
 For FPM with a separately built debug CUNIT extension exposing the read-only

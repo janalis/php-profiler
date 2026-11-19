@@ -86,8 +86,8 @@ PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" python3 scripts/sampling-contr
 if [[ "$OSTYPE" != darwin* ]]; then
   php -n -d "extension=$PROFILER_EXTENSION" tests/native/c-boundaries.php
 fi
-PROFILER_CONTRACT_EXTENSION="$PROFILER_EXTENSION" python3 scripts/adapter-contract-tests.py
-python3 scripts/test-report-oom.py
+PROFILER_CONTRACT_EXTENSION="$PROFILER_EXTENSION" scripts/php-tool.sh scripts/adapter-contract-tests.php
+scripts/php-tool.sh scripts/test-report-oom.php
 cargo +"$coverage_toolchain" llvm-cov report --json --output-path "$run_directory/coverage.json"
 # cargo-llvm-cov exports Rust coverage; explicitly include the instrumented C bridge
 # in a second export so the release gate cannot mistake Rust-only coverage for all code.

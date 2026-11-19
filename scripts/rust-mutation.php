@@ -221,7 +221,8 @@ try {
             $run,
         ];
         $manifest['test_command'] = $testing;
-        $process = proc_open($testing, [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes, null, $environment);
+        // Inherit the descriptors themselves, so a redirected log keeps every line.
+        $process = proc_open($testing, [], $pipes, null, $environment);
         $status = $process === false ? 1 : proc_close($process);
         $outcomes = json_decode(
             (string) file_get_contents("{$run}/mutants.out/outcomes.json"),

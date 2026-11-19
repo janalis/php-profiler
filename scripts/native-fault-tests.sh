@@ -34,4 +34,4 @@ done
 php -n -d "extension=$extension" tests/native/fiber-failure-metrics.php
 # Zend MM may be intentionally disabled; report unavailable memory explicitly.
 env USE_ZEND_ALLOC=0 php -n -d "extension=$extension" tests/native/memory-unavailable.php
-python3 scripts/runtime-dl-tests.py
+scripts/php-tool.sh scripts/runtime-dl-tests.php

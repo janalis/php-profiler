@@ -388,7 +388,7 @@ python3 -m unittest discover -s tests/python
 scripts/php-tool.sh tests/tools/run.php
 scripts/php-tests.sh
 scripts/native-fault-tests.sh
-python3 scripts/adapter-contract-tests.py
+scripts/php-tool.sh scripts/adapter-contract-tests.php
 php -n -d extension=/path/to/extension tests/native/large-profile-boundary.php
 CC=/path/to/matching/clang scripts/native-coverage.sh
 scripts/clang-gcov.sh
@@ -405,9 +405,10 @@ Clang-gcov coverage requires the pinned Linux development image described in
 matching LLVM major used by nightly Rust. These tools are development dependencies;
 the extension has no Python, compiler, external-agent or network runtime dependency.
 
-Real-report schema validation uses the pinned development-only `jsonschema`
-dependency in `requirements-dev.txt` and `scripts/schema-tests.py`. It resolves no
-remote schema references. [Historical receipts](validation-history.md) retain
+Real-report schema validation uses `scripts/schema-tests.php` and
+`scripts/lib/JsonSchema.php`, a strict JSON Schema 2020-12 validator for the keywords
+the published schemas use. It refuses any other keyword and resolves no remote schema
+references. [Historical receipts](validation-history.md) retain
 previous raw failures, scoped successes and benchmark results; they do not qualify
 the final source. Final release also requires acceptable measured disabled overhead
 and successful source-qualified completion of the gates above.
