@@ -17,7 +17,7 @@ const EXPECTED_SHUFFLES = [
 ];
 
 return [
-    'shuffles match python random' => static function (): void {
+    'shuffles match Python random' => static function (): void {
         $modes = ['absent', 'disabled', 'enabled'];
         $actual = array_map(static fn(int $seed): array => (new PythonRandom($seed))->shuffle($modes), [
             0,

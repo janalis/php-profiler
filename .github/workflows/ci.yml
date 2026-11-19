@@ -45,6 +45,8 @@ jobs:
           actionlint -version
           shellcheck --version
       - run: actionlint
+      - name: Keep the tooling free of Python
+        run: scripts/check-tooling.sh
       - name: Validate squash commit title
         if: github.event_name == 'pull_request'
         env:
@@ -88,7 +90,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - run: python3 -m unittest discover -s tests/python
       - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
       - run: scripts/php-tests.sh
@@ -418,7 +419,7 @@ jobs:
           # Match rust-toolchain.toml: adding clippy later to this toolchain intermittently
           # failed with "detected conflict: 'bin/cargo-clippy'".
           components: rustfmt, clippy
-      - run: python3 scripts/bootstrap-tools.py
+      - run: scripts/php-tool.sh scripts/bootstrap-tools.php
       - run: make fmt-check
 
   release-tooling:
@@ -432,7 +433,6 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: node --test scripts/release-tools.test.mjs
-      - run: python3 -m unittest discover -s tests/python
       - run: make package-check
 
   package-install:

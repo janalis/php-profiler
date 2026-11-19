@@ -11,6 +11,11 @@
     "actionlint": {
       "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz",
       "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"
+    },
+    "clang-format": {
+      "url": "https://files.pythonhosted.org/packages/47/a5/2007b7a7a53dfe417e66d0a6b38b2f87f16391bfe6fe522d436d1e50be1c/clang_format-23.1.3-py2.py3-none-macosx_11_0_arm64.whl",
+      "sha256": "79f53ac55434af6dda88eb90eeb65d903ff920c910f78041de41e3ca666dfba5",
+      "member": "clang_format/data/bin/clang-format"
     }
   },
   "Darwin/x86_64": {
@@ -25,6 +30,11 @@
     "actionlint": {
       "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_amd64.tar.gz",
       "sha256": "5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644"
+    },
+    "clang-format": {
+      "url": "https://files.pythonhosted.org/packages/05/0f/a1813ede1e149e700ee810baf22dd9c863ca0bd719d73f86e8c10b67a6bb/clang_format-23.1.3-py2.py3-none-macosx_10_9_x86_64.whl",
+      "sha256": "0b8e86cc5a870ca42989bd1ccfe5220fbab96e386922d0a8f0ca350db30593df",
+      "member": "clang_format/data/bin/clang-format"
     }
   },
   "Linux/x86_64": {
@@ -39,6 +49,11 @@
     "actionlint": {
       "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
       "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+    },
+    "clang-format": {
+      "url": "https://files.pythonhosted.org/packages/11/d1/658d3da4dcbca98620956868c7cf6f4ba19fccecbdfc30cc055e19c9d4a7/clang_format-23.1.3-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "58bf1804216501669832a39f2415e14284337438a062ff564729792adec664ac",
+      "member": "clang_format/data/bin/clang-format"
     }
   },
   "Linux/aarch64": {
@@ -53,6 +68,11 @@
     "actionlint": {
       "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz",
       "sha256": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6"
+    },
+    "clang-format": {
+      "url": "https://files.pythonhosted.org/packages/1d/00/a0f99e24dc4892fb120e82fa9cf6e8fcb92714181ffd1165ab7eaf5ba1fd/clang_format-23.1.3-py2.py3-none-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
+      "sha256": "072113527b49a9c0ab9058006d9fe20e583823e6482608a34e1883dd2c49ae7d",
+      "member": "clang_format/data/bin/clang-format"
     }
   }
 }

@@ -42,15 +42,18 @@ test('planner ignores unreachable branch releases and refuses malformed channel 
 });
 
 test('release preparation updates both lock entries and refuses dirty retries', async () => {
-  const { mkdirSync, writeFileSync, readFileSync, copyFileSync } = await import('node:fs');
+  const { mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, cpSync } = await import('node:fs');
   const cwd = mkdtempSync(join(tmpdir(), 'profiler-prepare-'));
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     mkdirSync(join(cwd, 'scripts'));
     mkdirSync(join(cwd, 'core', 'src'), {recursive: true});
     mkdirSync(join(cwd, 'ext', 'src'), {recursive: true});
-    copyFileSync(new URL('./prepare-release.py', import.meta.url), join(cwd, 'scripts', 'prepare-release.py'));
-    copyFileSync(new URL('./validate-version-transition.py', import.meta.url), join(cwd, 'scripts', 'validate-version-transition.py'));
+    for (const name of ['prepare-release.php', 'validate-version-transition.php', 'php-tool.sh']) {
+      copyFileSync(new URL(`./${name}`, import.meta.url), join(cwd, 'scripts', name));
+    }
+    chmodSync(join(cwd, 'scripts', 'php-tool.sh'), 0o755);
+    cpSync(new URL('./lib', import.meta.url), join(cwd, 'scripts', 'lib'), { recursive: true });
     writeFileSync(join(cwd, 'Cargo.toml'), '[workspace]\nmembers = ["core", "ext"]\nresolver = "2"\n[workspace.package]\nversion = "0.1.0"\n');
     for (const name of ['core', 'ext']) {
       writeFileSync(join(cwd, name, 'Cargo.toml'), `[package]\nname = "${name === 'core' ? 'profiler-core' : 'php-profiler'}"\nversion.workspace = true\nedition = "2021"\n`);
@@ -59,38 +62,37 @@ test('release preparation updates both lock entries and refuses dirty retries', 
     writeFileSync(join(cwd, 'CHANGELOG.md'), '# Changelog\n\n## [Unreleased]\n\n- Initial feature\n');
     execFileSync('cargo', ['metadata', '--offline', '--format-version=1'], {cwd, stdio: 'pipe'});
     const ledgerFixture = `
-import importlib.util, hashlib, json
-from pathlib import Path
-spec = importlib.util.spec_from_file_location('transition', 'scripts/validate-version-transition.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-for name in module.DEPENDENCIES:
-    path = Path(name)
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('fixture ' + name)
-ledger = Path(module.LEDGER)
-ledger.parent.mkdir(parents=True, exist_ok=True)
-ledger.write_text(json.dumps({'schema_version': 2, 'contexts': {'nts': {}}, 'equivalents': [], 'dependency_sha256': {name: module.digest(Path(name).read_bytes()) for name in module.DEPENDENCIES}}, indent=2) + '\\n')
+require 'scripts/lib/VersionTransition.php';
+use PhpProfiler\\Tooling\\VersionTransition;
+$hashes = [];
+foreach (VersionTransition::DEPENDENCIES as $name) {
+    if (!file_exists($name)) {
+        @mkdir(dirname($name), 0777, true);
+        file_put_contents($name, 'fixture ' . $name);
+    }
+    $hashes[$name] = hash('sha256', file_get_contents($name));
+}
+@mkdir(dirname(VersionTransition::LEDGER), 0777, true);
+file_put_contents(VersionTransition::LEDGER, json_encode(['schema_version' => 2, 'contexts' => ['nts' => new stdClass()], 'equivalents' => [], 'dependency_sha256' => $hashes], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\\n");
 `;
-    execFileSync('python3', ['-c', ledgerFixture], {cwd, stdio: 'pipe'});
+    execFileSync('scripts/php-tool.sh', ['-r', ledgerFixture], {cwd, stdio: 'pipe'});
     git('init', '-b', 'main');
     git('config', 'user.name', 'Release Test');
     git('config', 'user.email', 'release-test@example.invalid');
     // Explicit fixture-only paths, never stage ambient user work.
     git('add', 'Cargo.toml', 'Cargo.lock', 'CHANGELOG.md', 'scripts', 'core', 'ext', 'crates', 'docs', 'tests');
     git('commit', '-m', 'feat: initial');
-    execFileSync('python3', ['scripts/prepare-release.py', '0.1.0-alpha.1'], {cwd, stdio: 'pipe'});
+    execFileSync('scripts/php-tool.sh', ['scripts/prepare-release.php', '0.1.0-alpha.1'], {cwd, stdio: 'pipe'});
     const lock = readFileSync(join(cwd, 'Cargo.lock'), 'utf8');
     assert.equal((lock.match(/version = "0.1.0-alpha.1"/g) ?? []).length, 2);
     assert.match(readFileSync(join(cwd, 'CHANGELOG.md'), 'utf8'), /## \[0.1.0-alpha.1\] - \d{4}-\d{2}-\d{2}/);
-    assert.throws(() => execFileSync('python3', ['scripts/prepare-release.py', '0.1.0-alpha.2'], {cwd, stdio: 'pipe'}));
+    assert.throws(() => execFileSync('scripts/php-tool.sh', ['scripts/prepare-release.php', '0.1.0-alpha.2'], {cwd, stdio: 'pipe'}));
     git('add', '-A');
     git('commit', '-m', 'chore(release): prepare 0.1.0-alpha.1');
     git('tag', 'v0.1.0-alpha.1');
     // release-plan.mjs releases for a breaking change named only in a commit body.
     git('commit', '--allow-empty', '-m', 'refactor: drop the old API', '-m', 'BREAKING CHANGE: the old API is gone');
-    execFileSync('python3', ['scripts/prepare-release.py', '0.2.0-alpha.1'], {cwd, stdio: 'pipe'});
+    execFileSync('scripts/php-tool.sh', ['scripts/prepare-release.php', '0.2.0-alpha.1'], {cwd, stdio: 'pipe'});
     assert.match(readFileSync(join(cwd, 'CHANGELOG.md'), 'utf8'),
       /## \[0.2.0-alpha.1\] - \d{4}-\d{2}-\d{2}\n\n### Commits\n\n- refactor: drop the old API\n/);
     git('add', '-A');
@@ -98,377 +100,11 @@ ledger.write_text(json.dumps({'schema_version': 2, 'contexts': {'nts': {}}, 'equ
     git('tag', 'v0.2.0-alpha.1');
     // Nothing to list and an empty Unreleased section would publish empty notes: refuse before writing.
     git('commit', '--allow-empty', '-m', 'chore: tidy');
-    assert.throws(() => execFileSync('python3', ['scripts/prepare-release.py', '0.2.0-alpha.2'], {cwd, stdio: 'pipe'}), /No release notes/);
+    assert.throws(() => execFileSync('scripts/php-tool.sh', ['scripts/prepare-release.php', '0.2.0-alpha.2'], {cwd, stdio: 'pipe'}), /No release notes/);
     assert.equal(git('status', '--porcelain'), '');
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('registry receipts reject absent versions and unrelated source', () => {
-  const script = `
-import importlib.util
-spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-valid = {'package': {'name': 'janalis/php-profiler', 'versions': {'v0.1.0-alpha.1': {'version': 'v0.1.0-alpha.1', 'source': {'reference': 'abc', 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
-module.verify_packagist(valid, '0.1.0-alpha.1', 'abc')
-for payload, source in [(valid, 'wrong'), ({}, 'abc')]:
-    try:
-        module.verify_packagist(payload, '0.1.0-alpha.1', source)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError('invalid registry receipt accepted')
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
-
-test('finalization retries verify existing tags and assets without replacing them', () => {
-  const script = `
-import importlib.util, json, sys, tempfile
-from pathlib import Path
-from unittest.mock import patch
-spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-version = '0.1.0-alpha.1'
-source = 'a' * 40
-refs = [{'ref': 'refs/tags/v' + version, 'object': {'sha': source, 'type': 'commit'}}]
-release = [{'tag_name': 'v' + version, 'body': module.release_notes(Path('CHANGELOG.md').read_text(), version), 'assets': [{'name': 'source.tgz', 'browser_download_url': 'https://example.invalid/archive'}]}]
-packagist = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {'version': version, 'source': {'reference': source, 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
-def output(args, **kwargs):
-    if args[:2] == ['git', 'rev-parse']:
-        return source
-    if args[:2] == ['git', 'cat-file']:
-        return 'commit'
-    if '/actions/runs/' in args[-1]:
-        return json.dumps({'name': 'quality', 'conclusion': 'success', 'head_sha': source, 'head_branch': 'main', 'head_repository': {'full_name': 'janalis/php-profiler'}, 'event': 'workflow_dispatch'})
-    if args[-1].endswith('/git/ref/heads/main'):
-        return json.dumps({'object': {'sha': source}})
-    if 'matching-refs' in args[-1]:
-        return json.dumps(refs)
-    if 'releases?' in args[-1]:
-        return json.dumps([release])
-    raise AssertionError(args)
-def fetch(url):
-    return json.dumps(packagist).encode() if 'packagist' in url else b'archive'
-with tempfile.TemporaryDirectory() as directory:
-    archive = Path(directory) / 'source.tgz'
-    archive.write_bytes(b'archive')
-    with patch.object(sys, 'argv', ['finalize', version, str(archive), '--quality-run-id', '42']), patch.object(module.subprocess, 'check_output', side_effect=output), patch.object(module.subprocess, 'run') as run, patch.object(module, 'fetch', side_effect=fetch), patch.object(module, 'verify_checkout'):
-        run.return_value.returncode = 0
-        module.main()
-        assert run.call_count == 2
-        assert run.call_args.args[0][:3] == ['gh', 'release', 'upload']
-        assert '--clobber' not in run.call_args.args[0]
-        refs[0]['object']['sha'] = 'b' * 40
-        run.reset_mock()
-        try:
-            module.main()
-        except ValueError:
-            pass
-        else:
-            raise AssertionError('existing mismatched tag accepted')
-        run.assert_not_called()
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
-
-test('finalizer independently rejects dirty candidates, wrong versions and changed archive sources', () => {
-  const script = `
-import importlib.util, io, tarfile
-from pathlib import Path
-from unittest.mock import patch
-spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-version = '0.1.0-alpha.1'
-committed = {'Cargo.toml': b'version bytes', 'packaging/config.m4': b'config', 'packaging/Makefile.frag': b'fragment'}
-def build(changed=False):
-    output = io.BytesIO()
-    with tarfile.open(fileobj=output, mode='w:gz') as archive:
-        entries = {}
-        for name, data in committed.items():
-            entries['php-profiler-0.1.0-alpha.1/' + name] = data
-        if changed:
-            entries['php-profiler-0.1.0-alpha.1/Cargo.toml'] = b'changed'
-        for name, data in entries.items():
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            archive.addfile(info, io.BytesIO(data))
-    return output.getvalue()
-module.verify_archive(build(), version, committed)
-try:
-    module.verify_archive(build(True), version, committed)
-except ValueError:
-    pass
-else:
-    raise AssertionError('different source accepted')
-for results in [[b'M Cargo.toml'], [b'', b'[workspace.package]\\nversion = "0.1.0-alpha.2"']]:
-    with patch.object(module.subprocess, 'check_output', side_effect=results):
-        try:
-            module.verify_checkout(Path('.'), version, build())
-        except ValueError:
-            pass
-        else:
-            raise AssertionError('dirty or wrong-version candidate accepted')
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
-
-test('orchestration trusts exact source receipts and explicitly dispatches pinned quality runs', () => {
-  const script = `
-import importlib.util, subprocess
-from unittest.mock import patch
-spec = importlib.util.spec_from_file_location('release', 'scripts/release-automation.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-source = 'a' * 40
-run = {'name': 'quality', 'conclusion': 'success', 'head_sha': source, 'head_branch': 'main', 'event': 'push', 'head_repository': {'full_name': module.REPOSITORY}}
-assert module.validate_run(run, source) == 'main'
-for key, value in [('head_sha', 'wrong'), ('event', 'pull_request'), ('conclusion', 'failure')]:
-    changed = dict(run)
-    changed[key] = value
-    try:
-        module.validate_run(changed, source)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError('untrusted quality run accepted')
-run.update(head_branch='release/0.1.0-alpha.1-aaaaaaaaaaaa', event='workflow_dispatch', actor={'login': 'github-actions[bot]'})
-assert module.validate_run(run, source).startswith('release/')
-run['actor']['login'] = 'someone-else'
-try:
-    module.validate_run(run, source)
-except ValueError:
-    pass
-else:
-    raise AssertionError('non-bot candidate dispatch accepted')
-with patch.object(module.subprocess, 'run') as dispatch:
-    module.dispatch('main', source)
-    assert dispatch.call_args.args[0] == ['gh', 'workflow', 'run', 'ci.yml', '--repo', module.REPOSITORY, '--ref', 'main', '-f', 'expected_sha=' + source]
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
-
-test('lightweight tag publication uses a real non-force push, safely resumes and rejects changed tags', () => {
-  const script = `
-import importlib.util, json, subprocess, tempfile
-from pathlib import Path
-from unittest.mock import patch
-spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-original_output = subprocess.check_output
-original_run = subprocess.run
-repo = 'janalis/php-profiler'
-with tempfile.TemporaryDirectory() as directory:
-    root = Path(directory) / 'source'
-    root.mkdir()
-    remote = Path(directory) / 'remote.git'
-    def git(*args):
-        return original_output(['git', *args], cwd=root, stderr=subprocess.PIPE, text=True).strip()
-    git('init', '-b', 'main')
-    git('config', 'user.name', 'Release Test')
-    git('config', 'user.email', 'release@example.invalid')
-    git('commit', '--allow-empty', '-m', 'feat: initial')
-    source = git('rev-parse', 'HEAD')
-    original_run(['git', 'init', '--bare', str(remote)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    git('remote', 'add', 'origin', str(remote))
-    commands = []
-    current = source
-    def output(args, **kwargs):
-        if args[:3] == ['git', 'remote', 'get-url']:
-            return 'https://github.com/' + repo + '.git'
-        if args[:2] == ['gh', 'api']:
-            return json.dumps({'object': {'sha': current}})
-        return original_output(args, **kwargs)
-    def run(args, **kwargs):
-        commands.append(args)
-        if args == ['gh', 'auth', 'setup-git']:
-            return subprocess.CompletedProcess(args, 0)
-        kwargs.setdefault('stdout', subprocess.PIPE)
-        kwargs.setdefault('stderr', subprocess.PIPE)
-        return original_run(args, **kwargs)
-    tag = 'v0.1.0-alpha.1'
-    reference = 'refs/tags/' + tag
-    refs = [{'ref': reference, 'object': {'sha': source, 'type': 'commit'}}]
-    with patch.object(module.subprocess, 'check_output', side_effect=output), patch.object(module.subprocess, 'run', side_effect=run):
-        module.publish_tag(root, repo, source, tag, [])
-        assert ['git', 'push', 'origin', reference] in commands
-        assert all('--force' not in command and '-f' not in command for command in commands)
-        assert original_output(['git', '--git-dir=' + str(remote), 'rev-parse', reference], text=True).strip() == source
-        commands.clear()
-        module.publish_tag(root, repo, source, tag, refs)
-        assert not any(command[:2] == ['git', 'push'] for command in commands)
-        assert not any(command[:2] == ['gh', 'auth'] for command in commands)
-        git('commit', '--allow-empty', '-m', 'fix: another commit')
-        other = git('rev-parse', 'HEAD')
-        git('tag', '-f', tag, other)
-        commands.clear()
-        try:
-            module.publish_tag(root, repo, source, tag, refs)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError('wrong local tag accepted')
-        assert not any(command[:2] == ['git', 'push'] for command in commands)
-        current = other
-        commands.clear()
-        try:
-            module.publish_tag(root, repo, source, 'v0.1.0-alpha.2', [])
-        except ValueError:
-            pass
-        else:
-            raise AssertionError('main race accepted')
-        assert not any(command[:2] == ['git', 'push'] for command in commands)
-        assert original_output(['git', '--git-dir=' + str(remote), 'rev-parse', reference], text=True).strip() == source
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
-
-test('release notes hold only the released version section', () => {
-  const script = `
-import importlib.util, json, sys, tempfile
-from pathlib import Path
-from unittest.mock import patch
-spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-changelog = '''# Changelog
-
-## [Unreleased]
-
-### Fixed
-
-- Pending.
-
-## [0.1.0-alpha.2] - 2026-01-02
-
-### Commits
-
-- fix: second (#2)
-
-### Fixed
-
-- Second.
-
-## [0.1.0-alpha.5]
-
-- Undated.
-
-## [0.1.0-alpha.1] - 2026-01-01
-
-### Added
-
-- First.
-'''
-notes = module.release_notes(changelog, '0.1.0-alpha.2')
-assert notes == '### Commits\\n\\n- fix: second (#2)\\n\\n### Fixed\\n\\n- Second.\\n', notes
-assert module.release_notes(changelog, '0.1.0-alpha.1') == '### Added\\n\\n- First.\\n'
-# A heading-like line inside a code fence belongs to the section.
-fenced = '## [0.1.0-alpha.3] - 2026-01-03\\n\\n- Example:\\n\\n\\x60\\x60\\x60md\\n## [x]\\n\\x60\\x60\\x60\\n\\n## [0.1.0-alpha.2] - 2026-01-02\\n\\n- Second.\\n'
-assert module.release_notes(fenced, '0.1.0-alpha.3') == '- Example:\\n\\n\\x60\\x60\\x60md\\n## [x]\\n\\x60\\x60\\x60\\n'
-for version in ('0.1.0-alpha.3', '0.1.0-alpha', 'Unreleased', '0.1.0-alpha.5'):
-    try:
-        module.release_notes(changelog, version)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError('missing section accepted: ' + version)
-try:
-    module.release_notes('## [0.1.0-alpha.4] - 2026-01-04\\n\\n## [0.1.0-alpha.3]\\n', '0.1.0-alpha.4')
-except ValueError:
-    pass
-else:
-    raise AssertionError('empty section accepted')
-
-# Every published body is the real CHANGELOG section: on creation, and repaired on retry.
-version = '0.1.0-alpha.1'
-source = 'a' * 40
-expected = module.release_notes(Path('CHANGELOG.md').read_text(), version)
-assert not any(line.startswith('## ') for line in expected.splitlines()) and 'Unreleased' not in expected
-refs = [{'ref': 'refs/tags/v' + version, 'object': {'sha': source, 'type': 'commit'}}]
-releases = []
-packagist = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {'version': version, 'source': {'reference': source, 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
-def output(args, **kwargs):
-    if args[:2] == ['git', 'rev-parse']:
-        return source
-    if args[:2] == ['git', 'cat-file']:
-        return 'commit'
-    if '/actions/runs/' in args[-1]:
-        return json.dumps({'name': 'quality', 'conclusion': 'success', 'head_sha': source, 'head_branch': 'main', 'head_repository': {'full_name': 'janalis/php-profiler'}, 'event': 'workflow_dispatch'})
-    if args[-1].endswith('/git/ref/heads/main'):
-        return json.dumps({'object': {'sha': source}})
-    if 'matching-refs' in args[-1]:
-        return json.dumps(refs)
-    if 'releases?' in args[-1]:
-        return json.dumps([releases])
-    raise AssertionError(args)
-def fetch(url):
-    return json.dumps(packagist).encode() if 'packagist' in url else b'archive'
-published = []
-def run(args, **kwargs):
-    if args[:3] in (['gh', 'release', 'create'], ['gh', 'release', 'edit']):
-        published.append((args[2], Path(args[args.index('--notes-file') + 1]).read_text()))
-    class Result:
-        returncode = 0
-    return Result()
-with tempfile.TemporaryDirectory() as directory:
-    archive = Path(directory) / 'source.tgz'
-    archive.write_bytes(b'archive')
-    with patch.object(sys, 'argv', ['finalize', version, str(archive), '--quality-run-id', '42']), patch.object(module.subprocess, 'check_output', side_effect=output), patch.object(module.subprocess, 'run', side_effect=run), patch.object(module, 'fetch', side_effect=fetch), patch.object(module, 'verify_checkout'):
-        module.main()
-        assert published == [('create', expected)], published
-        assets = [{'name': name, 'browser_download_url': 'https://example.invalid/' + name} for name in ('source.tgz', 'source.tgz.sha256')]
-        sha = (Path(directory) / 'source.tgz.sha256').read_bytes()
-        fetch_assets = lambda url: sha if url.endswith('.sha256') else fetch(url)
-        with patch.object(module, 'fetch', side_effect=fetch_assets):
-            for body, edits in ((Path('CHANGELOG.md').read_text(), [('edit', expected)]), (expected.replace('\\n', '\\r\\n'), [])):
-                published.clear()
-                releases[:] = [{'tag_name': 'v' + version, 'body': body, 'assets': assets}]
-                module.main()
-                assert published == edits, (published, edits)
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
-
-test('registry verification refreshes each cache key and preserves bounded exact-source validation', () => {
-  const script = `
-import importlib.util, json
-from urllib.parse import urlsplit, parse_qs
-from unittest.mock import patch, call
-spec = importlib.util.spec_from_file_location('release', 'scripts/finalize-release.py')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-version = '0.1.0-alpha.1'
-source = 'a' * 40
-missing = json.dumps({'package': {'name': 'janalis/php-profiler', 'versions': {}}}).encode()
-valid = {'package': {'name': 'janalis/php-profiler', 'versions': {version: {'version': version, 'source': {'reference': source, 'url': 'https://github.com/janalis/php-profiler.git'}}}}}
-with patch.object(module, 'fetch', side_effect=[missing, json.dumps(valid).encode()]) as fetch, patch.object(module.time, 'time_ns', side_effect=[100, 101]), patch.object(module.time, 'sleep') as sleep:
-    module.verify_published_package(version, source)
-    assert fetch.call_count == 2
-    urls = [item.args[0] for item in fetch.call_args_list]
-    assert len(set(urls)) == 2
-    for attempt, url in enumerate(urls):
-        parts = urlsplit(url)
-        assert (parts.scheme, parts.netloc, parts.path) == ('https', 'packagist.org', '/packages/janalis/php-profiler.json')
-        assert parse_qs(parts.query) == {'verification': [str(100 + attempt) + '-' + str(attempt)]}
-    sleep.assert_called_once_with(10)
-# Fresh data with a wrong source must fail; cache refresh never weakens identity.
-valid['package']['versions'][version]['source']['reference'] = 'b' * 40
-for response, expected_error in [(missing, 'not indexed'), (json.dumps(valid).encode(), 'does not match')]:
-    with patch.object(module, 'fetch', return_value=response) as fetch, patch.object(module.time, 'time_ns', return_value=100), patch.object(module.time, 'sleep') as sleep:
-        try:
-            module.verify_published_package(version, source)
-        except ValueError as error:
-            assert expected_error in str(error)
-        else:
-            raise AssertionError('invalid registry identity accepted')
-        assert fetch.call_count == 4
-        assert len({item.args[0] for item in fetch.call_args_list}) == 4
-        assert sleep.call_args_list == [call(10)] * 3
-`;
-  execFileSync('python3', ['-c', script], {cwd: new URL('..', import.meta.url), stdio: 'pipe'});
-});
+// Finalization, orchestration and registry checks run in the PHP suite: tests/tools/*Release*Test.php.

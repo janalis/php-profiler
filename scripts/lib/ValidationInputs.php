@@ -11,7 +11,7 @@ use SplFileInfo;
 
 require_once __DIR__ . '/Paths.php';
 
-/** Fingerprints validation inputs without a Git dependency; must match scripts/validation_inputs.py. */
+/** Fingerprints validation inputs without a Git dependency. */
 final class ValidationInputs
 {
     private const array FILES = [
@@ -31,7 +31,6 @@ final class ValidationInputs
         'rust-toolchain',
         '.cargo/config.toml',
         '.dockerignore',
-        'requirements-dev.txt',
         'Dockerfile',
         'schema/report-v1.json',
         'vendor/ext-php-rs/src/exception.rs',

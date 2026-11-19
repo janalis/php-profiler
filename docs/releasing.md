@@ -2,7 +2,7 @@
 
 The alpha channel starts at **0.1.0-alpha.1**. Fixes and features increment the alpha counter; breaking changes advance the minor base and restart at alpha.1. Maintenance-only commits do not release. Stable promotion requires a reviewed channel change. Only release tags reachable from the candidate commit affect version selection.
 
-Run `npm ci --ignore-scripts`, `node --test scripts/release-tools.test.mjs`, and `npm run release:plan --silent` in a Git checkout. Planning is read-only. `python3 scripts/prepare-release.py VERSION` requires a clean checkout and prepares the workspace version, both lockfile package entries, and changelog together. Commit summaries are generated from Conventional Commits; existing Unreleased notes move into the new version. The ledger transition validator may update only the two Cargo dependency hashes after proving the restricted version-only change described below; native proof contents are never rewritten.
+Run `npm ci --ignore-scripts`, `node --test scripts/release-tools.test.mjs`, and `npm run release:plan --silent` in a Git checkout. Planning is read-only. `scripts/php-tool.sh scripts/prepare-release.php VERSION` requires a clean checkout and prepares the workspace version, both lockfile package entries, and changelog together. Commit summaries are generated from Conventional Commits; existing Unreleased notes move into the new version. The ledger transition validator may update only the two Cargo dependency hashes after proving the restricted version-only change described below; native proof contents are never rewritten.
 
 ## Default-token release flow
 
@@ -20,7 +20,7 @@ These distinctions follow [GitHub's token event policy](https://docs.github.com/
 
 ## Restricted version transition
 
-`scripts/validate-version-transition.py BASE_SHA VERSION --apply` derives a ledger update from immutable base bytes. Before changing anything it requires the exact 32-input dependency inventory and verifies every base dependency hash. It proves that only workspace package version text and the two internal Cargo.lock package versions changed; editions, dependency versions, lock text outside those entries, build.rs, build flags represented by audited inputs, runtime sources, fixtures, and all other proof dependencies remain identical.
+`scripts/validate-version-transition.php BASE_SHA VERSION --apply` derives a ledger update from immutable base bytes. Before changing anything it requires the exact 34-input dependency inventory and verifies every base dependency hash. It proves that only workspace package version text and the two internal Cargo.lock package versions changed; editions, dependency versions, lock text outside those entries, build.rs, build flags represented by audited inputs, runtime sources, fixtures, and all other proof dependencies remain identical.
 
 Only the Cargo.toml and Cargo.lock dependency SHA-256 values may change. Source spans, replacements, native compiler/libc contexts, equivalent classifications, and every other ledger byte remain unchanged. Missing/stale hashes, changed native contexts, extra lock entries, source edits and arbitrary ledger edits are rejected. The receipt at `target/version-transition.json` records the base SHA, actual old/new hashes, ledger hashes and unchanged-input count. It is evidence of a version transition, not a replacement for native validation.
 
@@ -28,7 +28,7 @@ Preparation applies this helper before committing. Trusted-main orchestration in
 
 ## Source archives and publication
 
-PIE uses Packagist package `janalis/php-profiler`, composer.json and packaging/config.m4. Installation requires Rust and matching PHP development headers. `python3 scripts/package-source.py` produces `target/php-profiler-source.tar.gz` from clean committed HEAD with reproducible metadata and committed export rules.
+PIE uses Packagist package `janalis/php-profiler`, composer.json and packaging/config.m4. Installation requires Rust and matching PHP development headers. `scripts/php-tool.sh scripts/package-source.php` produces `target/php-profiler-source.tar.gz` from clean committed HEAD with reproducible metadata and committed export rules.
 
 `PUBLISHING_ENABLED=true` enables publication only after exact main quality validation. Finalization independently verifies the successful main quality run, current main head, clean tracked checkout, committed workspace version, and complete source archive contents. Historical evidence cannot approve a changed tree. A version transition still fails if the base native ledger is stale, including after source formatting. Such a base requires a separate audited proof renewal; the release helper cannot renew it. Unsupported allocation measurements, measured disabled overhead and upstream failed-startup sanitizer limitations remain documented; alpha publication does not establish production readiness.
 

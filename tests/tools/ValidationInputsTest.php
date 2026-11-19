@@ -21,7 +21,6 @@ return [
             'packaging/Makefile.frag',
             'php/Profiler.php',
             '.dockerignore',
-            'requirements-dev.txt',
             'Dockerfile',
             'tests/docker/Dockerfile',
             'tests/docker/ClangCoverage.Dockerfile',
@@ -33,7 +32,7 @@ return [
         ];
         $ignored = [
             'tests/support/example/target/build.rs',
-            'scripts/__pycache__/cached.py',
+            'scripts/__pycache__/cached.php',
             'tests/mutants.out/copy.rs',
             'scripts/.json',
             'scripts/notes.txt',
