@@ -12,13 +12,22 @@ namespace PhpProfiler\Tooling;
 final class Arguments
 {
     /**
+     * Like argparse, a repeated option keeps its last value, unless it is named in
+     * $repeated (argparse's action="append"): those always yield a list.
+     *
      * @param list<string> $arguments the script's argv, including argv[0]
-     * @param list<string> $valued option names taking a value; repeated ones become lists
+     * @param list<string> $valued option names taking a value
      * @param list<string> $flags option names taking no value
+     * @param list<string> $repeated valued option names that collect every occurrence
      * @return array{options: array<string, string|list<string>|true>, positionals: list<string>}
      */
-    public static function parse(array $arguments, array $valued, array $flags = [], string $usage = ''): array
-    {
+    public static function parse(
+        array $arguments,
+        array $valued,
+        array $flags = [],
+        string $usage = '',
+        array $repeated = [],
+    ): array {
         $options = [];
         $positionals = [];
         $count = count($arguments);
@@ -43,7 +52,7 @@ final class Arguments
                 self::fail("unrecognized argument: {$argument}", $usage);
             }
             $value ??= ($index + 1) < $count ? $arguments[++$index] : self::fail("--{$name} expects a value", $usage);
-            $options[$name] = isset($options[$name]) ? [...((array) $options[$name]), $value] : $value;
+            $options[$name] = in_array($name, $repeated, true) ? [...($options[$name] ?? []), $value] : $value;
         }
         return ['options' => $options, 'positionals' => $positionals];
     }

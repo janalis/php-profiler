@@ -145,14 +145,16 @@ final class ProcessGroups
                 }
             } finally {
                 $this->retire($pid);
+                // Drop the reaped status on every path, so a reused PID never finds it.
+                $status = $this->statuses[$pid] ?? null;
+                unset($this->statuses[$pid]);
             }
             $stdout = $output === null ? null : (string) file_get_contents($output);
             $stderr = $errors === null ? null : (string) file_get_contents($errors);
             if ($expired) {
                 throw new ProcessTimedOut($command, $timeout, $stdout, $stderr);
             }
-            $result = new ProcessResult($command, $this->statuses[$pid], $stdout, $stderr);
-            unset($this->statuses[$pid]);
+            $result = new ProcessResult($command, (int) $status, $stdout, $stderr);
             if ($check && $result->status !== 0) {
                 throw new ProcessFailed($result);
             }

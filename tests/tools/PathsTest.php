@@ -31,5 +31,17 @@ return [
             Paths::suffix('a.tar.gz'),
         ]);
         same(['a/x', 'a-b/x'], Paths::sort(['a-b/x', 'a/x']));
+        // Expected orders come from sorted() over pathlib.PurePosixPath.
+        same(['a', 'a/b', 'a/b/c', 'a-b', 'a.b', 'b', 'x/10', 'x/9'], Paths::sort([
+            'b',
+            'a/b/c',
+            'x/10',
+            'x/9',
+            'a',
+            'a/b',
+            'a-b',
+            'a.b',
+        ]));
+        same(['/a', '/a/c', '/b'], Paths::sort(['/b', '/a/c', '/a']));
     },
 ];

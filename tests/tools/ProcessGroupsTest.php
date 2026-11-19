@@ -73,6 +73,8 @@ return [
         $path = temporaryPath();
         $runner = new ProcessGroups();
         throws(ProcessTimedOut::class, static fn() => $runner->run(['sh', '-c', FAMILY, 'family', $path], 2));
+        throws(ProcessFailed::class, static fn() => $runner->run(['sh', '-c', 'exit 3'], 5, check: true));
+        same([], (new ReflectionProperty(ProcessGroups::class, 'statuses'))->getValue($runner), 'stale statuses:');
         $runner->close();
         assertDead($path);
         unlink($path);

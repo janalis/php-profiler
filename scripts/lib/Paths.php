@@ -42,10 +42,28 @@ final class Paths
         return $dot === false || $dot === 0 || $dot === (strlen($name) - 1) ? '' : substr($name, $dot);
     }
 
-    /** Orders paths like sorted() over pathlib paths: component by component. */
+    /**
+     * Orders paths like sorted() over pathlib paths: parts compared as byte strings, one
+     * by one, and a path that is a prefix of another sorts first. PHP's array <=> cannot be
+     * used: it compares element counts first and numeric strings as numbers.
+     */
     public static function compare(string $left, string $right): int
     {
-        return explode('/', $left) <=> explode('/', $right);
+        $parts = static fn(string $path): array => (
+            str_starts_with($path, '/') ? ['/', ...array_slice(explode('/', $path), 1)] : explode('/', $path)
+        );
+        $leftParts = $parts($left);
+        $rightParts = $parts($right);
+        foreach ($leftParts as $index => $part) {
+            if (!isset($rightParts[$index])) {
+                return 1;
+            }
+            $order = strcmp($part, $rightParts[$index]);
+            if ($order !== 0) {
+                return $order <=> 0;
+            }
+        }
+        return count($leftParts) <=> count($rightParts);
     }
 
     /** @param list<string> $paths */

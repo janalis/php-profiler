@@ -10,4 +10,4 @@ use PhpProfiler\Tooling\Json;
 use PhpProfiler\Tooling\ValidationInputs;
 
 $root = realpath($argv[1] ?? '') ?: throw new RuntimeException('usage: coverage-snapshot.php <workspace>');
-echo Json::encode(ValidationInputs::snapshot($root), indent: 2), "\n";
+echo Json::encode((object) ValidationInputs::snapshot($root), indent: 2), "\n";
