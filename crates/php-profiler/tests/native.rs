@@ -57,8 +57,8 @@ fn real_zend_runtime() {
         contracts.success(),
         "native private adapter contracts must pass"
     );
-    let sampling = Command::new("python3")
-        .arg("scripts/sampling-controller-tests.py")
+    let sampling = Command::new(root.join("scripts/php-tool.sh"))
+        .arg("scripts/sampling-controller-tests.php")
         .env("PROFILER_SAMPLING_EXTENSION", &extension)
         .current_dir(&root)
         .status()

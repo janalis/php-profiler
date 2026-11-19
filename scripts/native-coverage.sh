@@ -81,8 +81,8 @@ if [[ "$OSTYPE" != darwin* ]]; then
 fi
 scripts/php-tests.sh
 scripts/native-fault-tests.sh
-python3 scripts/native-bailout-tests.py
-PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" python3 scripts/sampling-controller-tests.py
+scripts/php-tool.sh scripts/native-bailout-tests.php
+PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" scripts/php-tool.sh scripts/sampling-controller-tests.php
 if [[ "$OSTYPE" != darwin* ]]; then
   php -n -d "extension=$PROFILER_EXTENSION" tests/native/c-boundaries.php
 fi

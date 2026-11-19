@@ -21,5 +21,5 @@ else
   source scripts/link-native-faults.sh
   "$php" -n -d "extension=$PROFILER_EXTENSION" tests/native/c-boundaries.php
 fi
-PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" python3 scripts/sampling-controller-tests.py
-python3 scripts/native-bailout-tests.py
+PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" scripts/php-tool.sh scripts/sampling-controller-tests.php
+scripts/php-tool.sh scripts/native-bailout-tests.php

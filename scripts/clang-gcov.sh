@@ -47,8 +47,8 @@ source scripts/link-native-faults.sh
 export PROFILER_EXTENSION="$CARGO_TARGET_DIR/debug/libphp_profiler.so"
 scripts/php-tests.sh
 scripts/native-fault-tests.sh
-python3 scripts/native-bailout-tests.py
-PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" python3 scripts/sampling-controller-tests.py
+scripts/php-tool.sh scripts/native-bailout-tests.php
+PROFILER_SAMPLING_EXTENSION="$PROFILER_EXTENSION" scripts/php-tool.sh scripts/sampling-controller-tests.php
 php -n -d "extension=$PROFILER_EXTENSION" tests/native/c-boundaries.php
 mkdir -p "$CARGO_TARGET_DIR/reports"
 while IFS= read -r notes; do

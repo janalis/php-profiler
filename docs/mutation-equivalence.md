@@ -551,3 +551,17 @@ calling the callback with the slot emptied, the stand-in header
 function that bails out after filling the trigger header, and the FrankenPHP worker integration
 checks (a session started between requests, the start's wall time after an idle wait) must kill
 the new mutants.
+
+## 2026-11-19 test tooling renewal
+
+The C mutation test program and the native fault link moved from Python to PHP. No first-party
+source, compile command, fixture symbol, context or equivalent changed: every source hash,
+coordinate, replacement and proof anchor is the same. `scripts/c-mutation-tests.sh` now runs
+`tests/native/c-boundaries.php` through `scripts/owned-run.php`, which owns the child's process
+group exactly as the inline Python did, and calls `scripts/sampling-controller-tests.php` and
+`scripts/native-bailout-tests.php`. `scripts/link-native-faults.sh` now compiles and
+content-addresses the fault object through `scripts/native-fault-object.php`. The dependency
+hashes renew for the two shell scripts. `scripts/native-bailout-tests.py` is replaced by
+`scripts/native-bailout-tests.php`. `scripts/owned-run.php` and `scripts/native-fault-object.php`
+are added, because they now hold logic that was inline in hashed shell scripts. The NTS and ZTS
+C mutation runs must still classify the same 23 and 22 equivalents and kill every other mutant.
