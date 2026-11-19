@@ -3,7 +3,7 @@ export PATH := $(CURDIR)/target/tools/bin:$(PATH)
 CLANG_FORMAT ?= $(if $(wildcard target/tools/venv/bin/clang-format),target/tools/venv/bin/clang-format,clang-format)
 PYTHON ?= $(if $(wildcard target/tools/venv/bin/python),target/tools/venv/bin/python,python3)
 MAGO ?= $(if $(wildcard target/tools/bin/mago),target/tools/bin/mago,mago)
-PHP_FILES := $(shell find php tests -type f -name '*.php' -not -path '*/target/*')
+PHP_FILES := $(shell find php scripts tests -type f -name '*.php' -not -path '*/target/*')
 C_FILES := $(shell find crates tests -type f -not -path '*/target/*' \( -name '*.c' -o -name '*.h' \))
 help:
 	@echo 'bootstrap doctor fmt fmt-check lint build test test-php test-native-units test-matrix coverage mutation check verify package package-install-smoke release-dry-run bench hooks clean'
@@ -34,6 +34,7 @@ build:
 test:
 	cargo test --locked --workspace
 	$(PYTHON) -m unittest discover -s tests/python
+	scripts/php-tool tests/tools/run.php
 test-php: build
 	scripts/php-tests.sh
 test-native-units:
