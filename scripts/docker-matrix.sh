@@ -20,12 +20,12 @@ snapshot=$(mktemp -d "$compatibility/source-XXXXXXXX")
 scripts/php-tool.sh scripts/source-snapshot.php "$snapshot" "$compatibility/source-sha256.json"
 run_fpm_suite() {
   docker run --rm "$image" python3 scripts/automatic-tests.py --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
-  docker run --rm "$image" python3 scripts/fpm-test.py | tee "$compatibility/${version}-${sapi}-fpm.log"
+  docker run --rm "$image" scripts/php-tool.sh scripts/fpm-test.php | tee "$compatibility/${version}-${sapi}-fpm.log"
   docker run --rm "$image" python3 scripts/sampling-jit-tests.py --fpm \
     --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts nts \
     | tee "$compatibility/${version}-${sapi}-sampling-jit-reuse.json"
-  docker run --rm "$image" python3 scripts/fpm-recovery-test.py | tee "$compatibility/${version}-${sapi}-fpm-recovery.json"
-  docker run --rm "$image" python3 scripts/fpm-vendor-ownership-test.py | tee "$compatibility/${version}-${sapi}-fpm-vendor-ownership.json"
+  docker run --rm "$image" scripts/php-tool.sh scripts/fpm-recovery-test.php | tee "$compatibility/${version}-${sapi}-fpm-recovery.json"
+  docker run --rm "$image" scripts/php-tool.sh scripts/fpm-vendor-ownership-test.php | tee "$compatibility/${version}-${sapi}-fpm-vendor-ownership.json"
   opcache_environment=()
   if ! docker run --rm "$image" php -n -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);'; then
     opcache_environment=(-e PROFILER_FPM_OPCACHE_EXTENSION=opcache)
@@ -33,10 +33,10 @@ run_fpm_suite() {
   for fpm_mode in disabled opcache jit preload preload-jit; do
     jit_requirement=()
     if [[ "$fpm_mode" == jit || "$fpm_mode" == preload-jit ]]; then jit_requirement=(--require-jit); fi
-    docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" python3 scripts/fpm-closure-tests.py \
+    docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" scripts/php-tool.sh scripts/fpm-closure-tests.php \
       --mode "$fpm_mode" --expected-php "$version" --expected-zts nts ${jit_requirement[@]+"${jit_requirement[@]}"} | tee "$compatibility/${version}-${sapi}-closure-${fpm_mode}.json"
   done
-  docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" python3 scripts/fpm-closure-tests.py \
+  docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" scripts/php-tool.sh scripts/fpm-closure-tests.php \
     --mode preload-jit --require-jit --workers 4 --expected-php "$version" --expected-zts nts | tee "$compatibility/${version}-${sapi}-closure-preload-jit-four-workers.json"
 }
 for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do

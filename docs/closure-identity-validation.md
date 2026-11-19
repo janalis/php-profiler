@@ -39,7 +39,7 @@ local debug artifact, not certification of a later rebuilt matrix artifact.
 
 ## Same FPM worker, OPcache, JIT and preloading
 
-`scripts/fpm-closure-tests.py` issues 32 concurrent-client requests through one
+`scripts/fpm-closure-tests.php` issues 32 concurrent-client requests through one
 `pm=static`, one-child FPM worker. The worker PID must remain unchanged and every
 request must produce session ID 1, 21 closure rows, 64 total closure calls and
 the exact application result. Preload modes require the common functions to
@@ -92,7 +92,7 @@ UID probe:
 ```sh
 PROFILER_EXTENSION=/absolute/path/libphp_profiler.so \
 PROFILER_FPM_OPCACHE_EXTENSION=opcache \
-python3 scripts/fpm-closure-tests.py --mode preload-jit --require-jit --require-uid-probe
+scripts/php-tool.sh scripts/fpm-closure-tests.php --mode preload-jit --require-jit --require-uid-probe
 ```
 
 Omit `PROFILER_FPM_OPCACHE_EXTENSION` when OPcache is already built in. Normal
