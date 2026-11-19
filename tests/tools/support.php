@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . '/scripts/lib/Json.php';
+require_once dirname(__DIR__, 2) . '/scripts/lib/Paths.php';
 require_once dirname(__DIR__, 2) . '/scripts/lib/Process.php';
 
 const ROOT = __DIR__ . '/../..';
@@ -12,11 +13,7 @@ function temporaryDirectory(): string
 {
     $path = sys_get_temp_dir() . '/php-profiler-tools-' . bin2hex(random_bytes(8));
     mkdir($path, 0o700);
-    register_shutdown_function(static function () use ($path): void {
-        if (str_contains($path, '/php-profiler-tools-') && is_dir($path)) {
-            exec('rm -rf ' . escapeshellarg($path));
-        }
-    });
+    register_shutdown_function(static fn() => PhpProfiler\Tooling\Paths::removeTree($path));
     return (string) realpath($path);
 }
 

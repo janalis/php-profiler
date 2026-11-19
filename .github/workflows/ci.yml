@@ -94,9 +94,9 @@ jobs:
       - run: scripts/php-tests.sh
       - name: Verify large timeline persistence and accessor boundary once
         run: php -n -d "extension=$PWD/target/debug/libphp_profiler.so" tests/native/large-profile-boundary.php
-      - run: python3 scripts/test-vendored-exception.py
-      - run: python3 scripts/clone-bailout-tests.py
-      - run: python3 scripts/exception-bailout-tests.py
+      - run: scripts/php-tool.sh scripts/test-vendored-exception.php
+      - run: scripts/php-tool.sh scripts/clone-bailout-tests.php
+      - run: scripts/php-tool.sh scripts/exception-bailout-tests.php
       - run: python3 scripts/adapter-contract-tests.py
       - name: Validate real reports against the published schema
         run: |
@@ -378,7 +378,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
-      - run: python3 scripts/vendor-patch-mutation.py
+      - run: scripts/php-tool.sh scripts/vendor-patch-mutation.php
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

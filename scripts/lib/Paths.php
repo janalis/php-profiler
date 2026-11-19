@@ -105,6 +105,63 @@ final class Paths
         return self::sort(array_map(strval(...), array_keys($sources)));
     }
 
+    /**
+     * Like shutil.copytree(ignore=ignore_patterns(...), dirs_exist_ok=True): follows
+     * symlinks, skips the ignored names at any depth and keeps modification times.
+     *
+     * @param list<string> $ignored
+     */
+    public static function copyTree(string $source, string $target, array $ignored = []): void
+    {
+        if (!is_dir($target) && !mkdir($target, 0o777, true) && !is_dir($target)) {
+            throw new \RuntimeException('create ' . $target);
+        }
+        foreach (scandir($source) ?: throw new \RuntimeException('read ' . $source) as $name) {
+            if ($name === '.' || $name === '..' || in_array($name, $ignored, true)) {
+                continue;
+            }
+            $path = "{$source}/{$name}";
+            if (is_dir($path)) {
+                self::copyTree($path, "{$target}/{$name}", $ignored);
+            } else {
+                self::copyFile($path, "{$target}/{$name}");
+            }
+        }
+    }
+
+    /** Removes a directory tree without following symlinks out of it. */
+    public static function removeTree(string $path): void
+    {
+        if (is_link($path) || is_file($path)) {
+            unlink($path);
+            return;
+        }
+        if (!is_dir($path)) {
+            return;
+        }
+        foreach (scandir($path) ?: [] as $name) {
+            if ($name !== '.' && $name !== '..') {
+                self::removeTree("{$path}/{$name}");
+            }
+        }
+        rmdir($path);
+    }
+
+    /** Like shutil.copy2(): contents, permissions and modification time. */
+    public static function copyFile(string $source, string $target): void
+    {
+        if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0o777, true) && !is_dir(dirname($target))) {
+            throw new \RuntimeException('create ' . dirname($target));
+        }
+        if (
+            !copy($source, $target)
+            || !chmod($target, fileperms($source) & 0o7777)
+            || !touch($target, (int) filemtime($source))
+        ) {
+            throw new \RuntimeException('copy ' . $source);
+        }
+    }
+
     /** Like shutil.which(): the first executable file of that name on PATH. */
     public static function which(string $program, ?string $path = null): ?string
     {

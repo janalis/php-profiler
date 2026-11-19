@@ -24,7 +24,7 @@ equivalent ownership protection.
 
 ## Regression validation
 
-Run `python3 scripts/test-vendored-exception.py`. Its auxiliary extension lives
+Run `scripts/php-tool.sh scripts/test-vendored-exception.php`. Its auxiliary extension lives
 under `tests/support/exception-fixture`, is never part of the production PHP
 module, and exercises normal, pending, attached-object, invalid-object,
 NUL-message, and abstract-class exception paths. A test-only counting Rust
@@ -47,7 +47,7 @@ is a separate gate and is not established by these CLI subprocesses.
 
 ## Targeted patch mutation accounting
 
-Run `python3 scripts/vendor-patch-mutation.py --php /path/to/php83 --php-config
+Run `scripts/php-tool.sh scripts/vendor-patch-mutation.php --php /path/to/php83 --php-config
 /path/to/php83-config`. The runner copies the fixture and vendor source into
 an isolated temporary workspace. It rebuilds every mutant, saves source diffs,
 build/test logs and raw JSON results under `target/vendor-patch-mutation`, and
@@ -102,7 +102,7 @@ There is no Rust-owned error message to clean up. The original class-name text,
 error type, and fresh placeholder object returned on ordinary error paths are
 preserved; the original object is never returned as the failed clone.
 
-`python3 scripts/clone-bailout-tests.py` builds an auxiliary uncloneable class
+`scripts/php-tool.sh scripts/clone-bailout-tests.php` builds an auxiliary uncloneable class
 and a test-only native fault at the actual `zend_throw_error` boundary.
 On macOS it uses Mach-O interposition; on Linux the auxiliary module is built
 with GNU `--wrap=zend_throw_error`, because the PHP executable's own definition
@@ -125,7 +125,7 @@ accounting alongside the exception patch.
 
 ## Deterministic exception bailout versus natural OOM
 
-`python3 scripts/exception-bailout-tests.py` independently tests the immediate
+`scripts/php-tool.sh scripts/exception-bailout-tests.php` independently tests the immediate
 native-bailout contract with PHP `memory_limit=-1`. Both direct and formatted
 fallback messages reach `zend_throw_exception` in the pinned implementation.
 The test-only native transport forwards short priming exceptions unchanged,

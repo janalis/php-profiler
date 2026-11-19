@@ -100,7 +100,7 @@ The upstream 0.16.4 source had a concrete resource-retention defect: `PhpExcepti
 
 The local patch registers the exception, escaped-message and formatted-fallback owners with the dependency's existing `BailoutGuard` cleanup stack. The class name is borrowed `&str`, and the error variants reachable on this pinned fallback path have no heap-owned payload, so their unnecessary boxes were removed. It takes an optional attached object through the guard. It preserves normal return, pending-exception and fatal-error semantics. The patch is isolated and described in `vendor/README.profiler-patch.md`; no registry cache is modified.
 
-`python3 scripts/test-vendored-exception.py` now tests this defect directly using `tests/support/exception-fixture`, an auxiliary extension excluded from the production module. Its counting Rust global allocator forwards every allocation/reallocation/deallocation to `System` and measures outstanding requested bytes. The fixture primes fallback cleanup capacity before the baseline, constructs an actual 8 MiB Rust exception message, forces a real Zend memory-limit failure while throwing, and reads the outstanding Rust bytes in a PHP shutdown callback. Both direct and fallback paths must exit fatally with code 255 without catch or continuation markers and must have exactly equal before/after counters.
+`scripts/php-tool.sh scripts/test-vendored-exception.php` now tests this defect directly using `tests/support/exception-fixture`, an auxiliary extension excluded from the production module. Its counting Rust global allocator forwards every allocation/reallocation/deallocation to `System` and measures outstanding requested bytes. The fixture primes fallback cleanup capacity before the baseline, constructs an actual 8 MiB Rust exception message, forces a real Zend memory-limit failure while throwing, and reads the outstanding Rust bytes in a PHP shutdown callback. Both direct and fallback paths must exit fatally with code 255 without catch or continuation markers and must have exactly equal before/after counters.
 
 Coordinated native validation reported:
 
@@ -121,7 +121,7 @@ Constructor handling remains a separate, narrower assessment. This extension's r
 
 ## Targeted ownership-patch mutation evidence
 
-`scripts/vendor-patch-mutation.py` performs isolated native mutation experiments,
+`scripts/vendor-patch-mutation.php` performs isolated native mutation experiments,
 not a blanket dependency MSI calculation. The initial five-guard source produced
 five viable mutants: three ownership failures and two survivors, with no build
 failures or timeouts. Inspection proved the survivors wrapped a borrowed class
@@ -189,7 +189,7 @@ Zend class name with a static format instead; both PHP 8.3 (730/730) and PHP 8.5
 (794/794) preserve exact outstanding Rust allocation counts on injected bailout.
 The fresh error-path placeholder remains unchanged. See
 [vendor patch details](../vendor/README.profiler-patch.md) and
-`python3 scripts/clone-bailout-tests.py`. This is an injected allocation-boundary
+`scripts/php-tool.sh scripts/clone-bailout-tests.php`. This is an injected allocation-boundary
 proof, not a naturally triggered clone OOM or whole-dependency safety claim.
 
 The extended changed-hunk runner additionally restores the old owned clone-error

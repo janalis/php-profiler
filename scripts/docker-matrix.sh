@@ -65,7 +65,7 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
       continue
     fi
     if [[ "${PROFILER_TEST_MODE:-full}" != overlay ]]; then
-      docker run --rm "$image" python3 scripts/test-vendored-exception.py | tee "$compatibility/${version}-${sapi}-vendor-exception.log"
+      docker run --rm "$image" scripts/php-tool.sh scripts/test-vendored-exception.php | tee "$compatibility/${version}-${sapi}-vendor-exception.log"
     fi
     if [[ "${PROFILER_TEST_MODE:-full}" == full || "${PROFILER_TEST_MODE:-full}" == final ]]; then
       # Dedicated once per cell, never part of the repeated native mutation runner.
