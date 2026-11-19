@@ -90,20 +90,23 @@ return [
             ...glob(ROOT . '/scripts/lib/*.php'),
             ...glob(ROOT . '/tests/tools/*.php'),
         ];
+        // The tokenizer is a shared module that `php -n` may not load. Instead, string literals
+        // become "x" runs, so getenv('NAME') keeps an argument, and comments become spaces.
+        // Line breaks stay, so reported lines remain accurate.
+        $literals = '~\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|/\*.*?\*/|(?://|#(?!\[))[^\n]*~s';
         foreach ($files as $file) {
-            $ignored = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT];
-            $tokens = array_values(array_filter(
-                token_get_all((string) file_get_contents($file)),
-                static fn(mixed $token): bool => !is_array($token) || !in_array($token[0], $ignored, true),
-            ));
-            foreach ($tokens as $index => $token) {
-                $call =
-                    is_array($token)
-                    && in_array($token[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true)
-                    && strtolower(ltrim($token[1], '\\')) === 'getenv';
-                if ($call && ($tokens[$index + 1] ?? null) === '(' && ($tokens[$index + 2] ?? null) === ')') {
-                    $offenders[] = basename($file) . ':' . $token[2];
-                }
+            $code = (string) preg_replace_callback(
+                $literals,
+                static fn(array $match): string => (string) preg_replace(
+                    '/[^\n]/',
+                    in_array($match[0][0], ['\'', '"'], true) ? 'x' : ' ',
+                    $match[0],
+                ),
+                (string) file_get_contents($file),
+            );
+            preg_match_all('/(?<![\w$>:])\\\\?getenv\s*\(\s*\)/i', $code, $calls, PREG_OFFSET_CAPTURE);
+            foreach ($calls[0] as [, $offset]) {
+                $offenders[] = basename($file) . ':' . (substr_count($code, "\n", 0, $offset) + 1);
             }
         }
         same([], $offenders, 'use Process::environment():');
