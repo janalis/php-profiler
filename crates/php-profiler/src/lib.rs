@@ -197,9 +197,6 @@ struct State {
     generated_classes: GeneratedNames,
 }
 thread_local! { static FAILED: Cell<bool> = const {Cell::new(false)}; static STATE: RefCell<State> = RefCell::new(State::default()); }
-// Whether a profiler request is open on this thread: FrankenPHP's worker mode ends the PHP
-// request that ran its worker script after that script's requests already ended theirs.
-thread_local! { static REQUEST_OPEN: Cell<bool> = const { Cell::new(false) }; }
 fn budget_error(cause: BudgetError) -> PhpException {
     error(match cause {
         BudgetError::Limit => "Native profiler memory budget exhausted",
@@ -1267,19 +1264,18 @@ unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
 }
 /// FrankenPHP's worker mode serves each HTTP request inside the PHP request that runs the
 /// worker script and runs no extension's request hooks around it: the bridge calls this
-/// before each one, ending the worker script's start or nothing.
+/// once FrankenPHP has started each one.
 #[unsafe(no_mangle)]
 pub extern "C" fn profiler_worker_request_begin() {
-    end_request();
     begin_request();
 }
-/// Ends the worker request begun by `profiler_worker_request_begin`.
+/// Ends whatever profiler request is open: a worker request, or the worker script's start or
+/// code between requests before FrankenPHP waits for the next one. Ending twice is harmless.
 #[unsafe(no_mangle)]
 pub extern "C" fn profiler_worker_request_end() {
     end_request();
 }
 fn begin_request() {
-    REQUEST_OPEN.set(true);
     FAILED.set(false);
     unsafe {
         profiler_set_active(0);
@@ -1292,9 +1288,6 @@ fn begin_request() {
     automatic::start();
 }
 fn end_request() {
-    if !REQUEST_OPEN.replace(false) {
-        return;
-    }
     // Freeze every recording session before serializing the automatic report:
     // persistence work must not extend overlapping manual measurements.
     STATE.with(|s| {

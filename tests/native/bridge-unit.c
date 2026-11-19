@@ -421,8 +421,6 @@ static bool automatic_test_headers_released(void) {
 }
 static PHP_FUNCTION(automatic_test_request_headers) {
     (void)execute_data;
-    if (automatic_fault == 5)
-        zend_bailout();
     if (automatic_test_headers_kind == 2)
         RETURN_FALSE;
     array_init(return_value);
@@ -431,6 +429,9 @@ static PHP_FUNCTION(automatic_test_request_headers) {
         add_assoc_long(return_value, automatic_test_header_name, 42);
     else if (automatic_test_value)
         add_assoc_string(return_value, automatic_test_header_name, automatic_test_value);
+    /* A bailout after the matching header leaves an array the bridge must not read. */
+    if (automatic_fault == 5)
+        zend_bailout();
     zval_ptr_dtor(&automatic_test_last_headers);
     ZVAL_COPY(&automatic_test_last_headers, return_value);
 }
@@ -441,12 +442,18 @@ static const zend_function_entry automatic_test_header_functions[] = {
                   arginfo_automatic_headers) ZEND_FE_END};
 /* A stand-in for FrankenPHP's frankenphp_handle_request(): calls its callback once with
  * the argument 7 and returns what the callback returned. */
+static int automatic_worker_mode;
 static PHP_FUNCTION(automatic_test_handle_request) {
     zend_fcall_info fci;
     zend_fcall_info_cache fcc;
     ZEND_PARSE_PARAMETERS_START(1, 1)
     Z_PARAM_FUNC(fci, fcc)
     ZEND_PARSE_PARAMETERS_END();
+    /* Shutting down, FrankenPHP returns (5) or bails out (6) without calling the callback. */
+    if (automatic_worker_mode == 5)
+        RETURN_FALSE;
+    if (automatic_worker_mode == 6)
+        zend_bailout();
     zval argument, result;
     ZVAL_LONG(&argument, 7);
     ZVAL_UNDEF(&result);
@@ -458,8 +465,7 @@ static PHP_FUNCTION(automatic_test_handle_request) {
     RETURN_FALSE;
 }
 /* The application's callback: returns six times its argument (mode 0), throws (1), serves
- * a nested request (2) or bails out (3). */
-static int automatic_worker_mode;
+ * a nested request (2), bails out (3) or calls the bridge's callback directly (4). */
 static PHP_FUNCTION(automatic_test_worker_handler) {
     zval *arguments = NULL;
     uint32_t count = 0;
@@ -473,6 +479,13 @@ static PHP_FUNCTION(automatic_test_worker_handler) {
     }
     if (automatic_worker_mode == 3)
         zend_bailout();
+    if (automatic_worker_mode == 4) {
+        zval name;
+        ZVAL_STRING(&name, "PhpProfiler\\Internal\\frankenphp_request");
+        call_user_function(NULL, NULL, &name, return_value, 0, NULL);
+        zval_ptr_dtor(&name);
+        return;
+    }
     if (automatic_worker_mode == 2) {
         automatic_worker_mode = 0;
         zval name, callback;
@@ -496,6 +509,8 @@ static const zend_function_entry automatic_test_worker_functions[] = {
                   arginfo_automatic_handle_request)
         ZEND_FE(automatic_test_worker_handler, arginfo_automatic_worker_handler) ZEND_FE_END};
 /* Serves one worker request whose callback is `callback`; returns its result. */
+/* Whether the last served callback was handed back for the frame to release. */
+static bool automatic_worker_released;
 static zval automatic_worker_serve(const char *callback) {
     zval name, argument, result;
     ZVAL_STRING(&name, "frankenphp_handle_request");
@@ -503,6 +518,7 @@ static zval automatic_worker_serve(const char *callback) {
     ZVAL_UNDEF(&result);
     automatic_worker_log[0] = 0;
     call_user_function(NULL, NULL, &name, &result, 1, &argument);
+    automatic_worker_released = Z_REFCOUNT(argument) == 1;
     zval_ptr_dtor(&name);
     zval_ptr_dtor(&argument);
     return result;
@@ -533,18 +549,31 @@ static bool automatic_worker_contract(void) {
     automatic_worker_mode = 0;
     zval result = automatic_worker_serve("automatic_test_worker_handler");
     correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
-    correct &= !strcmp(automatic_worker_log, "bhe") && profiler_worker_handler == NULL;
+    correct &= !strcmp(automatic_worker_log, "ebhe") && profiler_worker_handler == NULL;
+    correct &= automatic_worker_released;
+    /* Shutting down, FrankenPHP returns without calling the callback: the slot is emptied. */
+    automatic_worker_mode = 5;
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= Z_TYPE(result) == IS_FALSE && !strcmp(automatic_worker_log, "e");
+    correct &= profiler_worker_handler == NULL && automatic_worker_released;
     /* An exception still ends the request and reaches FrankenPHP. */
     automatic_worker_mode = 1;
     result = automatic_worker_serve("automatic_test_worker_handler");
-    correct &= EG(exception) != NULL && !strcmp(automatic_worker_log, "bhe");
+    correct &= EG(exception) != NULL && !strcmp(automatic_worker_log, "ebhe");
+    zend_clear_exception();
+    zval_ptr_dtor(&result);
+    /* The callback runs once per frankenphp_handle_request() call: called directly from the
+     * application's callback, it refuses instead of restarting the request. */
+    automatic_worker_mode = 4;
+    result = automatic_worker_serve("automatic_test_worker_handler");
+    correct &= EG(exception) != NULL && !strcmp(automatic_worker_log, "ebhe");
     zend_clear_exception();
     zval_ptr_dtor(&result);
     /* A nested request runs inside the outer one's callback. */
     automatic_worker_mode = 2;
     result = automatic_worker_serve("automatic_test_worker_handler");
     correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
-    correct &= !strcmp(automatic_worker_log, "bhbhee") && profiler_worker_handler == NULL;
+    correct &= !strcmp(automatic_worker_log, "ebhebhee") && profiler_worker_handler == NULL;
     /* FrankenPHP rejects a missing or non-callable argument itself, before any request. */
     zval handle_name;
     ZVAL_STRING(&handle_name, "frankenphp_handle_request");
@@ -736,7 +765,7 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     sapi_module.name = "cgi-fcgi";
     profiler_trigger_snapshot();
     AUTOMATIC_ASSERT(profiler_trigger_matches((const unsigned char *)"secret", 6) == 0);
-    /* FrankenPHP 1.3+ answers from frankenphp_request_headers(), the request's headers
+    /* FrankenPHP 1.1+ answers from frankenphp_request_headers(), the request's headers
      * alone, so it is trusted: neither its getenv nor _SERVER, which both start from the
      * process environment, is read, even when they hold the secret. */
     AUTOMATIC_ASSERT(zend_register_functions(NULL, automatic_test_header_functions, NULL,
@@ -869,7 +898,19 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         zend_catch { bailed = true; }
         zend_end_try();
         correct &=
-            bailed && !strcmp(automatic_worker_log, "bhe") && profiler_worker_handler == NULL;
+            bailed && !strcmp(automatic_worker_log, "ebhe") && profiler_worker_handler == NULL;
+    } else if (mode && strcmp(mode, "worker-start") == 0) {
+        /* A bailout before the callback runs still empties the slot. */
+        correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
+                                          MODULE_PERSISTENT) == SUCCESS;
+        sapi_module.name = "frankenphp";
+        profiler_worker_register();
+        automatic_worker_mode = 6;
+        volatile bool bailed = false;
+        zend_try { automatic_worker_serve("automatic_test_worker_handler"); }
+        zend_catch { bailed = true; }
+        zend_end_try();
+        correct &= bailed && !strcmp(automatic_worker_log, "e") && profiler_worker_handler == NULL;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");

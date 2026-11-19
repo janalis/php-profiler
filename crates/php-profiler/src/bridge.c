@@ -328,7 +328,7 @@ static int profiler_sapi_in(const char *list) {
     snprintf(name, sizeof(name), "|%s|", sapi_module.name);
     return strstr(list, name) != NULL;
 }
-/* FrankenPHP 1.3+'s frankenphp_request_headers(), which reads the request's headers alone;
+/* FrankenPHP 1.1+'s frankenphp_request_headers(), which reads the request's headers alone;
  * NULL under every other SAPI. */
 static zend_function *profiler_request_headers;
 /* Calls frankenphp_request_headers() into `headers`, which the caller releases. The call
@@ -337,7 +337,11 @@ static void profiler_read_request_headers(zval *headers) {
     zend_try {
         zend_call_known_function(profiler_request_headers, NULL, NULL, headers, 0, NULL, NULL);
     }
-    zend_catch { profiler_defer_bailout(); }
+    zend_catch {
+        /* A bailout may leave a half-built array: never read or release it. */
+        profiler_defer_bailout();
+        ZVAL_UNDEF(headers);
+    }
     zend_end_try();
 }
 static void profiler_log(const char *message) {
@@ -350,7 +354,7 @@ static void profiler_log(const char *message) {
  * server and LiteSpeed in server mode from headers, FrankenPHP from
  * frankenphp_request_headers(). Every other SAPI may return the process environment
  * (php-cgi falls back to it, phpdbg, embed and phpmicro import it into _SERVER, as does
- * FrankenPHP before 1.3, whose getenv also serves it), so it is distrusted. */
+ * FrankenPHP before 1.1, whose getenv also serves it), so it is distrusted. */
 static int profiler_trusted_sapi;
 /* Whether the SAPI's getenv answers HTTP_* from the request: FastCGI parameters, Apache's
  * request table, LiteSpeed's headers. Elsewhere getenv may serve only the process
@@ -407,7 +411,7 @@ int profiler_trigger_matches(const unsigned char *secret, size_t length) {
         value = sapi_module.getenv("HTTP_X_PHP_PROFILER_TRIGGER",
                                    sizeof("HTTP_X_PHP_PROFILER_TRIGGER") - 1);
     } else {
-        /* The built-in HTTP server, NGINX Unit and FrankenPHP before 1.3 expose headers
+        /* The built-in HTTP server, NGINX Unit and FrankenPHP before 1.1 expose headers
          * through _SERVER only.
          * Materialization is engine-owned, but may allocate: contain bailout. */
         if (!profiler_materialize_server())
@@ -476,7 +480,10 @@ static ZEND_FUNCTION(profiler_worker_callback) {
     /* Every argument is variadic, so the frame holds them all in order. */
     uint32_t count = ZEND_NUM_ARGS();
     zval *arguments = ZEND_CALL_ARG(execute_data, 1);
+    /* Each frankenphp_handle_request() call arms the callback once: a direct call from the
+     * application's callback finds it disarmed instead of restarting the request. */
     zval *handler = profiler_worker_handler;
+    profiler_worker_handler = NULL;
     if (!handler) {
         zend_throw_error(NULL, "%s() runs only as frankenphp_handle_request()'s callback",
                          PROFILER_WORKER_CALLBACK);
@@ -520,6 +527,9 @@ static ZEND_NAMED_FUNCTION(profiler_handle_request) {
     ZVAL_INTERNED_STR(argument, profiler_worker_callback_name);
     zval *previous = profiler_worker_handler;
     profiler_worker_handler = &handler;
+    /* End the worker script's start, or what ran since the last request, before FrankenPHP
+     * waits for the next one: the wait belongs to no request. */
+    profiler_worker_request_end();
     zend_try { profiler_handle_request_original(execute_data, return_value); }
     zend_catch {
         profiler_worker_restore(argument, &handler, previous);

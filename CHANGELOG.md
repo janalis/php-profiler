@@ -4,6 +4,13 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+### Fixed
+
+- End a FrankenPHP worker's start, and any session started between its requests, before the worker waits for its next request, so the start's report no longer counts that wait and sessions started between requests are no longer dropped.
+- Never read the request headers FrankenPHP was still building when reading them bailed out.
+- Refuse a direct call of `PhpProfiler\Internal\frankenphp_request()` from a worker's request handler instead of restarting the request and running the handler again.
+- `frankenphp_request_headers()` exists from FrankenPHP 1.1, not 1.3: the documentation now says so.
+
 ## [0.1.0-alpha.12] - 2026-11-19
 
 ### Commits
@@ -22,7 +29,7 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ### Fixed
 
-- Read FrankenPHP trigger headers from `frankenphp_request_headers()` (FrankenPHP 1.3+), which holds request headers alone: a trigger variable inherited from the process environment no longer makes FrankenPHP ignore every request, and one set with a Caddyfile `env` setting, which FrankenPHP copies over request headers, no longer captures every request whatever trigger header it carries.
+- Read FrankenPHP trigger headers from `frankenphp_request_headers()` (FrankenPHP 1.1+), which holds request headers alone: a trigger variable inherited from the process environment no longer makes FrankenPHP ignore every request, and one set with a Caddyfile `env` setting, which FrankenPHP copies over request headers, no longer captures every request whatever trigger header it carries.
 
 ## [0.1.0-alpha.10] - 2026-11-17
 
