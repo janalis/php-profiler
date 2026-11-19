@@ -1,7 +1,6 @@
 .PHONY: help doctor fmt fmt-check check lint build test test-php test-native-units test-matrix coverage mutation clean
 export PATH := $(CURDIR)/target/tools/bin:$(PATH)
-CLANG_FORMAT ?= $(if $(wildcard target/tools/venv/bin/clang-format),target/tools/venv/bin/clang-format,clang-format)
-PYTHON ?= $(if $(wildcard target/tools/venv/bin/python),target/tools/venv/bin/python,python3)
+CLANG_FORMAT ?= $(if $(wildcard target/tools/bin/clang-format),target/tools/bin/clang-format,clang-format)
 MAGO ?= $(if $(wildcard target/tools/bin/mago),target/tools/bin/mago,mago)
 PHP_FILES := $(shell find php scripts tests -type f -name '*.php' -not -path '*/target/*')
 C_FILES := $(shell find crates tests -type f -not -path '*/target/*' \( -name '*.c' -o -name '*.h' \))
@@ -33,7 +32,6 @@ build:
 	cargo build --locked -p php-profiler
 test:
 	cargo test --locked --workspace
-	$(PYTHON) -m unittest discover -s tests/python
 	scripts/php-tool.sh tests/tools/run.php
 test-php: build
 	scripts/php-tests.sh
@@ -52,7 +50,7 @@ clean:
 
 .PHONY: package package-check verify
 package:
-	$(PYTHON) scripts/package-source.py
+	scripts/php-tool.sh scripts/package-source.php
 package-check:
 	php -n -r 'json_decode((string) file_get_contents("composer.json"), flags: JSON_THROW_ON_ERROR);'
 	sh -n scripts/build-extension.sh
@@ -64,7 +62,7 @@ release-dry-run:
 
 .PHONY: bootstrap hooks bench
 bootstrap:
-	python3 scripts/bootstrap-tools.py
+	scripts/php-tool.sh scripts/bootstrap-tools.php
 	npm ci --ignore-scripts
 hooks:
 	git config --local core.hooksPath .githooks

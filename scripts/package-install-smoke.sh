@@ -11,15 +11,7 @@ test -f "$archive"
 test -f "$pie"
 mkdir -p target
 work=$(mktemp -d "$PWD/target/pie-package-smoke.XXXXXX")
-python3 - "$archive" "$work/source" <<'PY'
-import sys
-import tarfile
-from pathlib import Path
-output = Path(sys.argv[2])
-output.mkdir()
-with tarfile.open(sys.argv[1]) as source:
-    source.extractall(output, filter='data')
-PY
+scripts/php-tool.sh scripts/extract-archive.php "$archive" "$work/source"
 sources=("$work"/source/*)
 if [[ ${#sources[@]} != 1 || ! -f "${sources[0]}/composer.json" ]]; then
   echo 'Expected one PIE source root containing composer.json' >&2

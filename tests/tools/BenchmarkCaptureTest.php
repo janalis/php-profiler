@@ -216,7 +216,7 @@ return [
             ));
         }
     },
-    'median matches python statistics' => static function (): void {
+    'median matches Python statistics' => static function (): void {
         same([3, 2.5, 3.0, 1.5], [
             Benchmark::median([5, 1, 3]),
             Benchmark::median([4, 1, 2, 3]),

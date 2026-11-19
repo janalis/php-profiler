@@ -384,7 +384,6 @@ instrumented extension and dependency, not an uninstrumented PHP interpreter.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-python3 -m unittest discover -s tests/python
 scripts/php-tool.sh tests/tools/run.php
 scripts/php-tests.sh
 scripts/native-fault-tests.sh

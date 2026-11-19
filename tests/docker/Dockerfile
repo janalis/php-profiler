@@ -1,7 +1,7 @@
 ARG PHP_IMAGE=php:8.3-cli-bookworm
 FROM rust:1.99.1-slim-bookworm@sha256:f2c004e3d2d8b547e8cf7ffbc29205385f4e71d23e53e4e383065db5e9f822cd AS rust
 FROM ${PHP_IMAGE}
-RUN apt-get update && apt-get install -y --no-install-recommends libclang-dev clang python3 ca-certificates gcc libc6-dev pkg-config libsqlite3-dev libcurl4-openssl-dev libffi-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libclang-dev clang ca-certificates gcc libc6-dev pkg-config libsqlite3-dev libcurl4-openssl-dev libffi-dev && rm -rf /var/lib/apt/lists/*
 RUN docker-php-ext-install -j2 pdo_sqlite pcntl ffi
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
@@ -12,7 +12,7 @@ COPY crates ./crates
 COPY vendor ./vendor
 COPY schema ./schema
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo build --release -p php-profiler
-COPY .dockerignore requirements-dev.txt ./
+COPY .dockerignore ./
 COPY .github ./.github
 COPY scripts ./scripts
 COPY tests ./tests

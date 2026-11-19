@@ -15,7 +15,7 @@ RUN test "$PHP_VERSION" = "$PHP_EXPECTED_VERSION" \
     && php-config --configure-options | grep -- --enable-embed \
     && php-config --configure-options | grep -- --enable-zts
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libclang-dev clang python3 ca-certificates gcc libc6-dev pkg-config binutils libffi-dev \
+    libclang-dev clang ca-certificates gcc libc6-dev pkg-config binutils libffi-dev \
     && docker-php-ext-install -j2 ffi pcntl && rm -rf /var/lib/apt/lists/*
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup

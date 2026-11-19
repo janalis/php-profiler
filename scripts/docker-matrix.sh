@@ -19,7 +19,7 @@ snapshot=$(mktemp -d "$compatibility/source-XXXXXXXX")
 # Keep the immutable source/runner receipt for every cell, including failures.
 scripts/php-tool.sh scripts/source-snapshot.php "$snapshot" "$compatibility/source-sha256.json"
 run_fpm_suite() {
-  docker run --rm "$image" python3 scripts/automatic-tests.py --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
+  docker run --rm "$image" scripts/php-tool.sh scripts/automatic-tests.php --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
   docker run --rm "$image" scripts/php-tool.sh scripts/fpm-test.php | tee "$compatibility/${version}-${sapi}-fpm.log"
   docker run --rm "$image" scripts/php-tool.sh scripts/sampling-jit-tests.php --fpm \
     --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts nts \
@@ -55,7 +55,7 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
       server=(-e APACHE=apache2 -e APACHE_PHP_MODULE=/usr/lib/apache2/modules/libphp.so)
       label=Apache
       if [[ "$sapi" == frankenphp ]]; then server=(-e FRANKENPHP=frankenphp); label=FrankenPHP; fi
-      docker run --rm "${server[@]}" "$image" python3 scripts/automatic-tests.py \
+      docker run --rm "${server[@]}" "$image" scripts/php-tool.sh scripts/automatic-tests.php \
         | tee "$compatibility/${version}-${sapi}-automatic.log"
       grep -qx "automatic $label trigger checks passed" "$compatibility/${version}-${sapi}-automatic.log"
       if [[ "$sapi" == frankenphp ]]; then
