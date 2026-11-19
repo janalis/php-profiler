@@ -18,4 +18,4 @@ mkdir -p "$CARGO_TARGET_DIR/reports"
 while IFS= read -r notes; do
   (cd "$CARGO_TARGET_DIR/reports" && "${GCOV:-gcov}" --json-format -b -c "$notes")
 done < <(find "$CARGO_TARGET_DIR/debug/build" -path '*php-profiler*/out/*bridge.gcno' -print)
-python3 scripts/check-gcov.py "$CARGO_TARGET_DIR/reports"
+scripts/php-tool.sh scripts/check-gcov.php "$CARGO_TARGET_DIR/reports"

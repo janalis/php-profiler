@@ -49,7 +49,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: python3 scripts/check-pr-title.py
+        run: scripts/check-pr-title.sh
       - run: shellcheck scripts/*.sh
   integration:
     needs: source-pin
@@ -69,9 +69,9 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
-          extensions: pdo_sqlite, curl, pcntl
+          extensions: pdo_sqlite, curl, pcntl, ffi, posix
       - name: Verify requested PHP and SDK labels
-        run: python3 scripts/php-environment-check.py --version '${{ matrix.php }}' --zts '${{ matrix.zts }}'
+        run: scripts/php-tool.sh scripts/php-environment-check.php --version '${{ matrix.php }}' --zts '${{ matrix.zts }}'
       - name: Select a coherent Clang and libclang SDK
         run: |
           sudo apt-get update
@@ -89,13 +89,14 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: python3 -m unittest discover -s tests/python
+      - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
       - run: scripts/php-tests.sh
       - name: Verify large timeline persistence and accessor boundary once
         run: php -n -d "extension=$PWD/target/debug/libphp_profiler.so" tests/native/large-profile-boundary.php
-      - run: python3 scripts/test-vendored-exception.py
-      - run: python3 scripts/clone-bailout-tests.py
-      - run: python3 scripts/exception-bailout-tests.py
+      - run: scripts/php-tool.sh scripts/test-vendored-exception.php
+      - run: scripts/php-tool.sh scripts/clone-bailout-tests.php
+      - run: scripts/php-tool.sh scripts/exception-bailout-tests.php
       - run: python3 scripts/adapter-contract-tests.py
       - name: Validate real reports against the published schema
         run: |
@@ -174,7 +175,7 @@ jobs:
           php-version: '8.3'
           coverage: none
           extensions: pdo_sqlite, curl, pcntl
-      - run: python3 scripts/rust-mutation.py --timeout 240 --jobs 2
+      - run: scripts/php-tool.sh scripts/rust-mutation.php --timeout 240 --jobs 2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -282,7 +283,7 @@ jobs:
             profiler-c-mutation:${{ matrix.zts }} bash -euc '
               mkdir -p "$CARGO_HOME"
               cp -R /usr/local/cargo/registry "$CARGO_HOME/"
-              python3 scripts/php-environment-check.py --version 8.3 --zts "${{ matrix.zts }}"
+              scripts/php-tool.sh scripts/php-environment-check.php --version 8.3 --zts "${{ matrix.zts }}"
               scripts/c-mutation.sh
             '
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -332,6 +333,7 @@ jobs:
         with:
           php-version: '8.5'
           coverage: none
+          extensions: pcntl, ffi, posix
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
@@ -339,6 +341,7 @@ jobs:
         run: |
           php -r 'if (!PHP_ZTS) { throw new RuntimeException("ZTS PHP is required"); }'
           test -f "$(php-config --prefix)/lib/libphp.dylib"
+      - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
       - run: python3 scripts/zts-thread-tests.py
         env:
@@ -375,7 +378,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: '1.99.1'
-      - run: python3 scripts/vendor-patch-mutation.py
+      - run: scripts/php-tool.sh scripts/vendor-patch-mutation.php
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -485,13 +488,11 @@ jobs:
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: |
-          python3 - <<'PYCODE'
-          import json, os
-          jobs = json.loads(os.environ['RESULTS'])
-          failed = [name for name, job in jobs.items() if job['result'] != 'success']
-          if failed:
-              raise SystemExit('Unsuccessful quality jobs: ' + ', '.join(failed))
-          PYCODE
+          failed=$(jq -er '[to_entries[] | select(.value.result != "success") | .key] | join(", ")' <<< "$RESULTS")
+          if [[ -n "$failed" ]]; then
+            echo "Unsuccessful quality jobs: $failed" >&2
+            exit 1
+          fi
 
   release-continuation:
     needs: quality-gate

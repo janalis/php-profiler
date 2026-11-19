@@ -3,12 +3,12 @@ export PATH := $(CURDIR)/target/tools/bin:$(PATH)
 CLANG_FORMAT ?= $(if $(wildcard target/tools/venv/bin/clang-format),target/tools/venv/bin/clang-format,clang-format)
 PYTHON ?= $(if $(wildcard target/tools/venv/bin/python),target/tools/venv/bin/python,python3)
 MAGO ?= $(if $(wildcard target/tools/bin/mago),target/tools/bin/mago,mago)
-PHP_FILES := $(shell find php tests -type f -name '*.php' -not -path '*/target/*')
+PHP_FILES := $(shell find php scripts tests -type f -name '*.php' -not -path '*/target/*')
 C_FILES := $(shell find crates tests -type f -not -path '*/target/*' \( -name '*.c' -o -name '*.h' \))
 help:
 	@echo 'bootstrap doctor fmt fmt-check lint build test test-php test-native-units test-matrix coverage mutation check verify package package-install-smoke release-dry-run bench hooks clean'
 doctor:
-	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
+	scripts/check-tool-versions.sh "$(MAGO)" "$(CLANG_FORMAT)"
 	rustc --version
 	cargo --version
 	php --version
@@ -34,6 +34,7 @@ build:
 test:
 	cargo test --locked --workspace
 	$(PYTHON) -m unittest discover -s tests/python
+	scripts/php-tool.sh tests/tools/run.php
 test-php: build
 	scripts/php-tests.sh
 test-native-units:
@@ -43,17 +44,17 @@ test-matrix:
 coverage:
 	scripts/native-coverage.sh
 mutation:
-	$(PYTHON) scripts/rust-mutation.py --timeout 240 --jobs 2
+	scripts/php-tool.sh scripts/rust-mutation.php --timeout 240 --jobs 2
 	scripts/c-mutation.sh
 check: fmt-check lint test test-php test-native-units
 clean:
-	$(PYTHON) scripts/clean-builds.py
+	scripts/clean-builds.sh
 
 .PHONY: package package-check verify
 package:
 	$(PYTHON) scripts/package-source.py
 package-check:
-	$(PYTHON) -m json.tool composer.json >/dev/null
+	php -n -r 'json_decode((string) file_get_contents("composer.json"), flags: JSON_THROW_ON_ERROR);'
 	sh -n scripts/build-extension.sh
 verify: check coverage mutation test-matrix package-check
 
@@ -73,7 +74,7 @@ bench:
 
 .PHONY: formatter-versions
 formatter-versions:
-	$(PYTHON) scripts/check-tool-versions.py "$(MAGO)" "$(CLANG_FORMAT)"
+	scripts/check-tool-versions.sh "$(MAGO)" "$(CLANG_FORMAT)"
 
 .PHONY: package-install-smoke
 package-install-smoke: package
