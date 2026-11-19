@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.13] - 2026-11-19
+
+### Commits
+
+- fix: end FrankenPHP worker requests where they end (#37)
+
 ### Fixed
 
 - End a FrankenPHP worker's start, and any session started between its requests, before the worker waits for its next request, so the start's report no longer counts that wait and sessions started between requests are no longer dropped.
