@@ -56,7 +56,6 @@ final class ValidationInputs
         'c',
         'h',
         'php',
-        'py',
         'sh',
         'toml',
         'lock',
@@ -64,7 +63,7 @@ final class ValidationInputs
         'yaml',
         'json',
     ];
-    private const array EXCLUDED_PARTS = ['target', '__pycache__', 'mutants.out'];
+    private const array EXCLUDED_PARTS = ['target', 'mutants.out'];
 
     /** @return array<string, string> relative path => SHA-256, sorted by path */
     public static function snapshot(string $root): array

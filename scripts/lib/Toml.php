@@ -16,6 +16,8 @@ final class Toml
 {
     private string $text;
     private int $position = 0;
+    /** @var array<string, true> explicit [table] headers, keyed by their resolved location */
+    private array $headers = [];
 
     private function __construct(string $text)
     {
@@ -28,7 +30,11 @@ final class Toml
         return (new self($text))->document();
     }
 
-    /** Deep equality of decoded documents: tables ignore key order, lists keep theirs. */
+    /**
+     * Deep equality of decoded documents: tables ignore key order, lists keep theirs. An
+     * empty table and an empty array both decode to [] and compare equal; the only caller
+     * compares Cargo.lock files, where Cargo never writes an empty table.
+     */
     public static function equal(mixed $left, mixed $right): bool
     {
         if (is_array($left) && is_array($right)) {
@@ -79,15 +85,27 @@ final class Toml
     private function &table(array &$root, array $path, bool $array): array
     {
         $node = &$root;
+        // Each [[array]] element is its own scope, so its index is part of the location.
+        $location = '';
         foreach (array_slice($path, 0, -1) as $key) {
             $node[$key] ??= [];
+            $location .= "\0" . $key;
             if (is_array($node[$key]) && array_is_list($node[$key]) && $node[$key] !== []) {
+                $location .= "\0#" . (count($node[$key]) - 1);
                 $node = &$node[$key][count($node[$key]) - 1];
             } else {
                 $node = &$node[$key];
             }
         }
         $last = $path[count($path) - 1];
+        if (!$array) {
+            // Like tomllib: a table may be defined by one [header] only.
+            $location .= "\0" . $last;
+            if (isset($this->headers[$location])) {
+                throw new InvalidArgumentException("TOML table {$last} is defined twice");
+            }
+            $this->headers[$location] = true;
+        }
         if ($array) {
             $node[$last] ??= [];
             if (!array_is_list($node[$last])) {

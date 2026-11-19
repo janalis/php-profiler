@@ -16,6 +16,7 @@ $usage = 'coverage-run-manifest.php <run> <parent> <status> [--artifact <name>].
     $argv,
     ['artifact', 'artifact-directory'],
     usage: $usage,
+    repeated: ['artifact', 'artifact-directory'],
 );
 $artifactNames = (array) ($options['artifact'] ?? []);
 $artifactDirectories = (array) ($options['artifact-directory'] ?? []);

@@ -24,6 +24,7 @@ $usage = 'rust-mutation.php [--package <name>]... [--output <directory>] [--time
     ['package', 'output', 'timeout', 'jobs'],
     ['list-only'],
     $usage,
+    ['package'],
 );
 $integer = static fn(string $name, int $default): int => (
     isset($options[$name])

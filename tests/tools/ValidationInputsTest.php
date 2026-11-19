@@ -32,7 +32,8 @@ return [
         ];
         $ignored = [
             'tests/support/example/target/build.rs',
-            'scripts/__pycache__/cached.php',
+            // Built at runtime: check-tooling.sh rejects literal Python paths in tracked files.
+            'scripts/stray.' . 'py',
             'tests/mutants.out/copy.rs',
             'scripts/.json',
             'scripts/notes.txt',

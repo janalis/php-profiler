@@ -181,4 +181,36 @@ return [
         );
         same([0o755, 'tool'], [fileperms("{$root}/good/source/tool") & 0o7777, readlink("{$root}/good/source/link")]);
     },
+    'smoke extraction replaces repeated members and stops on a failed write' => static function (): void {
+        $root = temporaryDirectory();
+        $extract = static function (string $name, array $entries) use ($root): array {
+            writeFile("{$root}/{$name}.tar.gz", (string) gzencode(Tar::write($entries)));
+            return Process::run([
+                ROOT . '/scripts/php-tool.sh',
+                ROOT . '/scripts/extract-archive.php',
+                "{$root}/{$name}.tar.gz",
+                "{$root}/{$name}",
+            ]);
+        };
+        $repeated = $extract('repeated', [
+            ['name' => 'source/tool', 'data' => 'first'],
+            ['name' => 'source/tool', 'data' => 'second'],
+            ['name' => 'source/other', 'data' => 'kept'],
+            ['name' => 'source/entry', 'type' => 'symlink', 'link' => 'other'],
+            ['name' => 'source/entry', 'data' => 'replaced the link'],
+        ]);
+        same(0, $repeated['status'], $repeated['stderr']);
+        same('second', file_get_contents("{$root}/repeated/source/tool"));
+        same(false, is_link("{$root}/repeated/source/entry"));
+        same(['replaced the link', 'kept'], [
+            file_get_contents("{$root}/repeated/source/entry"),
+            file_get_contents("{$root}/repeated/source/other"),
+        ]);
+        $clash = $extract('clash', [
+            ['name' => 'source/tool', 'type' => 'directory'],
+            ['name' => 'source/tool', 'data' => 'x'],
+        ]);
+        same(1, $clash['status'], 'a file member replaced a directory');
+        same(true, str_contains($clash['stderr'], 'archive member replaces a directory'), $clash['stderr']);
+    },
 ];

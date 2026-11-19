@@ -100,8 +100,12 @@ if [[ ${#profiles[@]} != 1 ]]; then
   exit 1
 fi
 profile_data=$(cd -P "$(dirname "${profiles[0]}")" && printf '%s/%s' "$(pwd -P)" "$(basename "${profiles[0]}")")
+# A command substitution, unlike a process substitution, lets set -e stop on a failed listing.
+c_source_list=$(scripts/php-tool.sh scripts/runtime-sources.php "$PWD" c)
 c_sources=()
-while IFS= read -r source; do c_sources+=("$source"); done < <(scripts/php-tool.sh scripts/runtime-sources.php "$PWD" c)
+while IFS= read -r source; do
+  if [[ -n "$source" ]]; then c_sources+=("$source"); fi
+done <<< "$c_source_list"
 if [[ ${#c_sources[@]} == 0 ]]; then
   echo 'No runtime C sources found' >&2
   exit 1

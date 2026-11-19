@@ -27,6 +27,20 @@ if (file_exists($destination) || !mkdir($destination, 0o777, true)) {
 }
 $destination = Paths::resolve($destination);
 $inside = static fn(string $path): bool => $path === $destination || str_starts_with($path, $destination . '/');
+// A later member replaces an earlier file or link of the same name, like tarfile, and
+// is never written through a link. Every failed write stops the extraction.
+$directory = static function (string $path, string $name): void {
+    if (!is_dir($path) && (is_link($path) || !mkdir($path, 0o755, true))) {
+        fail('cannot create archive directory for: ' . $name);
+    }
+};
+$replace = static function (string $path, string $name): void {
+    if (is_link($path) || is_file($path)) {
+        unlink($path) || fail('cannot replace archive member: ' . $name);
+    } elseif (file_exists($path)) {
+        fail('archive member replaces a directory: ' . $name);
+    }
+};
 foreach (Tar::read($contents) as $entry) {
     $name = $entry['name'];
     if ($name === '' || str_starts_with($name, '/') || in_array('..', explode('/', $name), true)) {
@@ -38,21 +52,27 @@ foreach (Tar::read($contents) as $entry) {
     }
     switch ($entry['type']) {
         case 'directory':
-            is_dir($target) || mkdir($target, 0o755, true);
+            $directory($target, $name);
             break;
         case 'file':
-            is_dir(dirname($target)) || mkdir(dirname($target), 0o755, true);
-            file_put_contents($target, $entry['data']);
+            $directory(dirname($target), $name);
+            $replace($target, $name);
             // Like the data filter: keep owner execute bits, drop set-id and group or other write.
-            chmod($target, ($entry['mode'] & 0o100) !== 0 ? 0o755 : 0o644);
+            if (
+                file_put_contents($target, $entry['data']) !== strlen($entry['data'])
+                || !chmod($target, ($entry['mode'] & 0o100) !== 0 ? 0o755 : 0o644)
+            ) {
+                fail('cannot write archive member: ' . $name);
+            }
             break;
         case 'symlink':
             $link = str_starts_with($entry['link'], '/') ? $entry['link'] : dirname($target) . '/' . $entry['link'];
             if (str_starts_with($entry['link'], '/') || !$inside(Paths::resolve($link))) {
                 fail('archive link leaves the destination: ' . $name);
             }
-            is_dir(dirname($target)) || mkdir(dirname($target), 0o755, true);
-            symlink($entry['link'], $target);
+            $directory(dirname($target), $name);
+            $replace($target, $name);
+            symlink($entry['link'], $target) || fail('cannot create archive link: ' . $name);
             break;
         default:
             fail('archive member is not a regular file, directory or symlink: ' . $name);

@@ -22,6 +22,7 @@ foreach (array_keys(ValidationInputs::snapshot($root)) as $name) {
     Paths::copyFile($root . '/' . $name, $destination . '/' . $name);
 }
 foreach (['crates', 'scripts', 'tests', 'vendor', 'schema', '.github'] as $name) {
+    // Checkouts from before the PHP port may still hold ignored Python caches.
     Paths::copyTree($root . '/' . $name, $destination . '/' . $name, [
         'target',
         '__pycache__',
@@ -37,4 +38,5 @@ foreach ($iterator as $file) {
         $hashes[$relative] = hash_file('sha256', $file->getPathname());
     }
 }
-file_put_contents($receipt, Json::encode($hashes, indent: 2)) ?: throw new RuntimeException('write ' . $receipt);
+file_put_contents($receipt, Json::encode((object) $hashes, indent: 2))
+    ?: throw new RuntimeException('write ' . $receipt);
