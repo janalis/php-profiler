@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 // Strict Clang gcov intermediate coverage: every raw first-party C counter.
-require __DIR__ . '/lib/Arguments.php';
-require __DIR__ . '/lib/Json.php';
-require __DIR__ . '/lib/Paths.php';
+require_once __DIR__ . '/lib/Arguments.php';
+require_once __DIR__ . '/lib/Json.php';
+require_once __DIR__ . '/lib/Paths.php';
 
 use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\Json;

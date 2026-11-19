@@ -342,7 +342,7 @@ unsupported capabilities.
 
 ## Mutation and safety gates
 
-`scripts/rust-mutation.py` discovers every runtime Rust source, persists unfiltered
+`scripts/rust-mutation.php` discovers every runtime Rust source, persists unfiltered
 and production-scope candidate inventories, and executes all test code through
 nextest with immediate failure cancellation. Test transports outside runtime
 source are executed, not substituted for runtime candidates. The raw report
@@ -385,13 +385,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 python3 -m unittest discover -s tests/python
+scripts/php-tool.sh tests/tools/run.php
 scripts/php-tests.sh
 scripts/native-fault-tests.sh
 python3 scripts/adapter-contract-tests.py
 php -n -d extension=/path/to/extension tests/native/large-profile-boundary.php
 CC=/path/to/matching/clang scripts/native-coverage.sh
 scripts/clang-gcov.sh
-python3 scripts/rust-mutation.py --timeout 240
+scripts/php-tool.sh scripts/rust-mutation.php --timeout 240
 MULL_TIMEOUT_MS=240000 MULL_PLUGIN=/path/to/matching/plugin scripts/c-mutation.sh
 scripts/docker-matrix.sh
 scripts/native-sanitizers.sh

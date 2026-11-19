@@ -15,7 +15,8 @@ return [
             indent: 2,
         ));
     },
-    'floats are refused until a receipt needs them' => static function (): void {
-        throws(InvalidArgumentException::class, static fn() => Json::encode(['x' => 1.5]));
+    'non-finite floats are refused' => static function (): void {
+        throws(InvalidArgumentException::class, static fn() => Json::encode(['x' => INF]));
+        throws(InvalidArgumentException::class, static fn() => Json::encode(['x' => NAN]));
     },
 ];

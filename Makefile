@@ -44,7 +44,7 @@ test-matrix:
 coverage:
 	scripts/native-coverage.sh
 mutation:
-	$(PYTHON) scripts/rust-mutation.py --timeout 240 --jobs 2
+	scripts/php-tool.sh scripts/rust-mutation.php --timeout 240 --jobs 2
 	scripts/c-mutation.sh
 check: fmt-check lint test test-php test-native-units
 clean:

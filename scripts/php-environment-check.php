@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 // Verifies an actual PHP and SDK installation against the requested CI matrix label.
-require __DIR__ . '/lib/Arguments.php';
-require __DIR__ . '/lib/Json.php';
-require __DIR__ . '/lib/Process.php';
+require_once __DIR__ . '/lib/Arguments.php';
+require_once __DIR__ . '/lib/Json.php';
+require_once __DIR__ . '/lib/Process.php';
 
 use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\Json;

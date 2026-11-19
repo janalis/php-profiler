@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 // Writes a JSON receipt of named environment variables (null when unset), in order,
 // followed by any --value key=value and --sha256 key=path entries in order.
-require __DIR__ . '/lib/Json.php';
+require_once __DIR__ . '/lib/Json.php';
 
 use PhpProfiler\Tooling\Json;
 

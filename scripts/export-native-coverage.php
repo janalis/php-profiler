@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Exports each execution cohort against only its own profiles, then merges them strictly.
-require __DIR__ . '/lib/NativeCoverageExport.php';
+require_once __DIR__ . '/lib/NativeCoverageExport.php';
 
 use PhpProfiler\Tooling\NativeCoverageExport;
 use PhpProfiler\Tooling\ProcessFailedStatus;

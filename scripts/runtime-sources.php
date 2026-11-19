@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Prints the runtime source registry, one resolved path per line, for shell callers.
-require __DIR__ . '/lib/Paths.php';
+require_once __DIR__ . '/lib/Paths.php';
 
 use PhpProfiler\Tooling\Paths;
 

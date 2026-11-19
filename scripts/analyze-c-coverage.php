@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 // Explains GCC branch gaps without changing raw counts or relaxing the gate.
-require __DIR__ . '/lib/Arguments.php';
-require __DIR__ . '/lib/CoverageAnalysis.php';
-require __DIR__ . '/lib/Json.php';
+require_once __DIR__ . '/lib/Arguments.php';
+require_once __DIR__ . '/lib/CoverageAnalysis.php';
+require_once __DIR__ . '/lib/Json.php';
 
 use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\CoverageAnalysis;

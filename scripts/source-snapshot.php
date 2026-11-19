@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 // Freezes one source tree so every Docker matrix cell validates identical inputs,
 // and records the SHA-256 of every frozen file.
-require __DIR__ . '/lib/Json.php';
-require __DIR__ . '/lib/ValidationInputs.php';
+require_once __DIR__ . '/lib/Json.php';
+require_once __DIR__ . '/lib/ValidationInputs.php';
 
 use PhpProfiler\Tooling\Json;
 use PhpProfiler\Tooling\ValidationInputs;

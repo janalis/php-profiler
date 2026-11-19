@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Rejects incompatible Rust and C LLVM instrumentation before compiling a mixed DSO.
-require __DIR__ . '/lib/CoverageToolchain.php';
+require_once __DIR__ . '/lib/CoverageToolchain.php';
 
 use PhpProfiler\Tooling\CoverageToolchain;
 

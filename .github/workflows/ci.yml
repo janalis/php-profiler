@@ -175,7 +175,7 @@ jobs:
           php-version: '8.3'
           coverage: none
           extensions: pdo_sqlite, curl, pcntl
-      - run: python3 scripts/rust-mutation.py --timeout 240 --jobs 2
+      - run: scripts/php-tool.sh scripts/rust-mutation.php --timeout 240 --jobs 2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 // Fails closed on uncovered first-party source; raw external data stays in the artifact.
-require __DIR__ . '/lib/Arguments.php';
-require __DIR__ . '/lib/Paths.php';
+require_once __DIR__ . '/lib/Arguments.php';
+require_once __DIR__ . '/lib/Paths.php';
 
 use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\Paths;
