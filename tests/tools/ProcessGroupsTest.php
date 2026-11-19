@@ -85,7 +85,7 @@ return [
             var_export(FAMILY, true),
             var_export($path, true),
         );
-        $process = proc_open([dirname(__DIR__, 2) . '/scripts/php-tool', '-r', $helper], [], $pipes);
+        $process = proc_open([dirname(__DIR__, 2) . '/scripts/php-tool.sh', '-r', $helper], [], $pipes);
         $deadline = hrtime(true) + 10_000_000_000;
         while (!is_file($path)) {
             same(true, hrtime(true) < $deadline, 'real signal-test family was never started:');

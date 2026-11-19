@@ -89,7 +89,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: python3 -m unittest discover -s tests/python
-      - run: scripts/php-tool tests/tools/run.php
+      - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
       - run: scripts/php-tests.sh
       - name: Verify large timeline persistence and accessor boundary once
@@ -341,7 +341,7 @@ jobs:
         run: |
           php -r 'if (!PHP_ZTS) { throw new RuntimeException("ZTS PHP is required"); }'
           test -f "$(php-config --prefix)/lib/libphp.dylib"
-      - run: scripts/php-tool tests/tools/run.php
+      - run: scripts/php-tool.sh tests/tools/run.php
       - run: cargo build -p php-profiler
       - run: python3 scripts/zts-thread-tests.py
         env:

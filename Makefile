@@ -34,7 +34,7 @@ build:
 test:
 	cargo test --locked --workspace
 	$(PYTHON) -m unittest discover -s tests/python
-	scripts/php-tool tests/tools/run.php
+	scripts/php-tool.sh tests/tools/run.php
 test-php: build
 	scripts/php-tests.sh
 test-native-units:
