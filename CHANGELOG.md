@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.14] - 2026-11-20
+
+### Commits
+
+- fix: keep a request's capture when FrankenPHP refuses a worker call (#44)
+
 ### Fixed
 
 - On FrankenPHP 1.13.4+, calling `frankenphp_handle_request()` outside worker mode no longer ends the current request's capture before FrankenPHP refuses the call: the report covers the whole request, including what runs after the refusal.
