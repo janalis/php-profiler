@@ -523,11 +523,7 @@ static bool profiler_worker_environment_version(const char *version) {
         version++;
     if (!version || sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3)
         return false;
-    if (major != 1)
-        return major > 1;
-    if (minor != 13)
-        return minor > 13;
-    return patch >= 4;
+    return major > 1 || (major == 1 && (minor > 13 || (minor == 13 && patch >= 4)));
 }
 /* Whether this request may run a FrankenPHP worker script. Every worker's environment holds
  * FRANKENPHP_WORKER, which FrankenPHP 1.13.4+ serves through its getenv hook. Only a request
