@@ -15,4 +15,7 @@ for extension in ffi pcntl posix zlib; do
   fi
 done
 # Coverage exports decode to large arrays; tooling is not memory-bounded like a request.
-exec "$php" -n -d ffi.enable=1 -d memory_limit=-1 -d display_errors=stderr -d error_reporting=-1 "$@"
+# Every warning a script raises becomes an exception, as Python would have raised.
+strict="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/Strict.php"
+exec "$php" -n -d ffi.enable=1 -d memory_limit=-1 -d display_errors=stderr -d error_reporting=-1 \
+  -d "auto_prepend_file=$strict" "$@"

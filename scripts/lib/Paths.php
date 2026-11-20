@@ -147,10 +147,13 @@ final class Paths
         }
     }
 
-    /** Removes a directory tree without following symlinks out of it. */
+    /**
+     * Removes a directory tree without following symlinks out of it. Anything that is not a
+     * directory, such as a socket or a FIFO, is unlinked: is_file() is false for both.
+     */
     public static function removeTree(string $path): void
     {
-        if (is_link($path) || is_file($path)) {
+        if (is_link($path) || file_exists($path) && !is_dir($path)) {
             unlink($path);
             return;
         }
