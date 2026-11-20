@@ -615,3 +615,11 @@ The new code is again after every recorded coordinate, so only the source and de
 renew. The bridge unit test's two- and three-argument calls, its `__callStatic` callback served with
 and without FrankenPHP calling back, and its registration under a stale snapshot must kill the new
 mutants.
+
+## 2026-11-20 cc 1.11.2
+
+`cc`, which `build.rs` uses to compile the bridge and sampling C sources, moves from 1.11.1 to
+1.11.2. Its only fix keeps GCC from merging identical variables under AddressSanitizer; the C
+mutation builds use clang, and no first-party source, compile command, fixture symbol, context
+or equivalent changed. Only the `Cargo.lock` and documentation dependency hashes renew. The NTS
+and ZTS C mutation runs must still classify the same equivalents and kill every other mutant.
