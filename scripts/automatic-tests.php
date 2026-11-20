@@ -720,6 +720,11 @@ function serverRequest(int $port, ?string $token, string $path = '/'): ?string
 // values, so its headers come from frankenphp_request_headers(). Its PHP build must match the
 // extension's, so this runs only where FRANKENPHP names one.
 if ((string) getenv('FRANKENPHP') !== '') {
+    // The release decides what a refused call outside worker mode does to the capture.
+    $frankenphpVersion = Process::output([(string) getenv('FRANKENPHP'), 'version']);
+    check(preg_match('/^FrankenPHP v?(\d+\.\d+\.\d+)\b/', $frankenphpVersion, $release) === 1, $frankenphpVersion);
+    $frankenphpRelease = $release[1];
+    echo "automatic FrankenPHP version {$frankenphpRelease}\n";
     /**
      * Serves root/ with php-server, or through a Caddyfile when $configured names an env value.
      * A $worker script serves every request from one worker thread; a $script replaces the
@@ -750,9 +755,11 @@ if ((string) getenv('FRANKENPHP') !== '') {
             array_push($command, '--worker', "{$root}/index.php,1");
         }
         if ($configured !== null) {
+            // FrankenPHP 1.3 and older start PHP only with the frankenphp global option, and 1.1
+            // gives php_server no directive order of its own.
             file_put_contents(
                 "{$directory}/Caddyfile",
-                "{\n\tadmin off\n\tauto_https off\n}\nhttp://127.0.0.1:{$port} {\n\troot * {$root}\n\tphp_server {\n\t\tenv HTTP_X_PHP_PROFILER_TRIGGER {$configured}\n\t}\n}\n",
+                "{\n\tadmin off\n\tauto_https off\n\tfrankenphp\n\torder php_server before file_server\n}\nhttp://127.0.0.1:{$port} {\n\troot * {$root}\n\tphp_server {\n\t\tenv HTTP_X_PHP_PROFILER_TRIGGER {$configured}\n\t}\n}\n",
             );
             $command = [
                 (string) getenv('FRANKENPHP'),
@@ -912,7 +919,9 @@ if ((string) getenv('FRANKENPHP') !== '') {
     echo "automatic FrankenPHP worker checks passed\n";
 
     // Outside worker mode FrankenPHP refuses frankenphp_handle_request(); the request keeps
-    // its one capture, including what runs after the refused call.
+    // its one capture. From 1.13.4 that capture includes what runs after the refused call;
+    // earlier releases cannot tell the extension the script is no worker, so the call ends it.
+    $refusalKeepsCapture = version_compare($frankenphpRelease, '1.13.4', '>=');
     $classic = <<<'CLASSIC'
         <?php
         function profiler_before_refused_call(): void {}
@@ -945,7 +954,8 @@ if ((string) getenv('FRANKENPHP') !== '') {
         basename($classicReports[0]) === "php-profile-{$identifier}.json"
         && $classicReport['termination_reason'] === 'request_complete'
         && $calls('profiler_before_refused_call') === 1
-        && $calls('profiler_after_refused_call') === 1,
+        && $calls('profiler_after_refused_call') === ($refusalKeepsCapture ? 1 : 0),
+        $frankenphpRelease,
         $classicReport['termination_reason'] ?? null,
         array_keys($classicReport['functions'] ?? []),
         $log,

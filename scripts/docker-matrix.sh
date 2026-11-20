@@ -43,22 +43,30 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
   for sapi in ${PHP_SAPIS:-cli zts fpm apache frankenphp}; do
     image="${PROFILER_IMAGE_PREFIX:-local-php-profiler}:${version}-${sapi}"
     php_image="php:${version}-${sapi}-bookworm"
-    # FrankenPHP's image builds PHP the official images' way, so extensions load as usual.
-    if [[ "$sapi" == frankenphp ]]; then php_image="dunglas/frankenphp:php${version}-bookworm"; fi
+    # FrankenPHP's image builds PHP the official images' way, so extensions load as usual. A
+    # frankenphp-X.Y.Z cell runs that FrankenPHP release instead of the latest one.
+    frankenphp_release=
+    if [[ "$sapi" == frankenphp-* ]]; then frankenphp_release="${sapi#frankenphp-}"; fi
+    if [[ "$sapi" == frankenphp* ]]; then
+      php_image="dunglas/frankenphp:${frankenphp_release:+${frankenphp_release}-}php${version}-bookworm"
+    fi
     docker build -f "$snapshot/tests/docker/Dockerfile" --build-arg "PHP_IMAGE=$php_image" -t "$image" "$snapshot"
     expected_zts=nts
-    if [[ "$sapi" == zts || "$sapi" == frankenphp ]]; then expected_zts=ts; fi
+    if [[ "$sapi" == zts || "$sapi" == frankenphp* ]]; then expected_zts=ts; fi
     docker run --rm "$image" scripts/php-tool.sh scripts/php-environment-check.php --version "$version" --zts "$expected_zts" \
       | tee "$compatibility/${version}-${sapi}-runtime.json"
-    if [[ "$sapi" == apache || "$sapi" == frankenphp ]]; then
+    if [[ "$sapi" == apache || "$sapi" == frankenphp* ]]; then
       # The other cells cover the CLI; these check only how each server hands requests to PHP.
       server=(-e APACHE=apache2 -e APACHE_PHP_MODULE=/usr/lib/apache2/modules/libphp.so)
       label=Apache
-      if [[ "$sapi" == frankenphp ]]; then server=(-e FRANKENPHP=frankenphp); label=FrankenPHP; fi
+      if [[ "$sapi" == frankenphp* ]]; then server=(-e FRANKENPHP=frankenphp); label=FrankenPHP; fi
       docker run --rm "${server[@]}" "$image" scripts/php-tool.sh scripts/automatic-tests.php \
         | tee "$compatibility/${version}-${sapi}-automatic.log"
       grep -qx "automatic $label trigger checks passed" "$compatibility/${version}-${sapi}-automatic.log"
-      if [[ "$sapi" == frankenphp ]]; then
+      if [[ "$sapi" == frankenphp* ]]; then
+        if [[ -n "$frankenphp_release" ]]; then
+          grep -qx "automatic FrankenPHP version $frankenphp_release" "$compatibility/${version}-${sapi}-automatic.log"
+        fi
         grep -qx "automatic FrankenPHP worker checks passed" "$compatibility/${version}-${sapi}-automatic.log"
         grep -qx "automatic FrankenPHP classic-mode checks passed" "$compatibility/${version}-${sapi}-automatic.log"
       fi
