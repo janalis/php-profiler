@@ -38,10 +38,7 @@ final class ReleaseAutomation
 
     private function check(array $command): void
     {
-        $status = $this->runner->run($command);
-        if ($status !== 0) {
-            throw new ProcessFailedStatus($command, $status, '');
-        }
+        ReleaseChecks::check($this->runner, $command);
     }
 
     public function api(string $path): array
@@ -112,13 +109,7 @@ final class ReleaseAutomation
 
     public function validateRun(array $run, string $source): string
     {
-        if (
-            ($run['name'] ?? null) !== 'quality'
-            || ($run['conclusion'] ?? null) !== 'success'
-            || ($run['head_sha'] ?? null) !== $source
-            || ($run['head_repository']['full_name'] ?? null) !== self::REPOSITORY
-            || !in_array($run['event'] ?? null, ['push', 'workflow_dispatch'], true)
-        ) {
+        if (!ReleaseChecks::exactQualityRun($run, $source, self::REPOSITORY)) {
             throw new InvalidArgumentException('Expected a successful exact-SHA quality run from this repository');
         }
         $branch = $run['head_branch'] ?? '';

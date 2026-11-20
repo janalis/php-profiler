@@ -250,14 +250,7 @@ final class FinalizeRelease
             true,
             flags: JSON_THROW_ON_ERROR,
         );
-        if (
-            ($run['name'] ?? null) !== 'quality'
-            || ($run['conclusion'] ?? null) !== 'success'
-            || ($run['head_sha'] ?? null) !== $source
-            || ($run['head_branch'] ?? null) !== 'main'
-            || ($run['head_repository']['full_name'] ?? null) !== $repository
-            || !in_array($run['event'] ?? null, ['push', 'workflow_dispatch'], true)
-        ) {
+        if (!ReleaseChecks::exactQualityRun($run, $source, $repository) || ($run['head_branch'] ?? null) !== 'main') {
             throw new InvalidArgumentException('Publication requires the exact successful main quality run');
         }
         $current = json_decode(
@@ -354,9 +347,6 @@ final class FinalizeRelease
 
     private function check(array $command, ?string $directory = null): void
     {
-        $status = $this->runner->run($command, $directory);
-        if ($status !== 0) {
-            throw new ProcessFailedStatus($command, $status, '');
-        }
+        ReleaseChecks::check($this->runner, $command, $directory);
     }
 }

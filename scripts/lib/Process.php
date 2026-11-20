@@ -41,20 +41,7 @@ final class Process
         if ($process === false) {
             throw new RuntimeException('start ' . $command[0]);
         }
-        $deadline = $timeout === null ? null : hrtime(true) + (int) ($timeout * 1e9);
-        $status = null;
-        while (true) {
-            $state = proc_get_status($process);
-            if (!$state['running']) {
-                $status = $state['signaled'] ? -$state['termsig'] : $state['exitcode'];
-                break;
-            }
-            if ($deadline !== null && hrtime(true) >= $deadline) {
-                proc_terminate($process, SIGKILL);
-                break;
-            }
-            usleep(2000);
-        }
+        $status = self::wait($process, $timeout === null ? null : hrtime(true) + (int) ($timeout * 1e9));
         proc_close($process);
         rewind($output);
         $stdout = (string) stream_get_contents($output);
@@ -64,6 +51,40 @@ final class Process
             $stderr = (string) stream_get_contents($errors);
         }
         return ['status' => $status, 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    /**
+     * The exit status, or minus the signal that ended the process; null when $deadline (an
+     * hrtime) passed and it was killed. Without a deadline, blocks in waitpid() instead of
+     * polling; with one, polls at intervals growing from 1 to 50 ms.
+     *
+     * @param resource $process
+     */
+    private static function wait($process, ?int $deadline): ?int
+    {
+        $state = proc_get_status($process);
+        if ($state['running'] && $deadline === null && function_exists('pcntl_waitpid')) {
+            do {
+                $reaped = pcntl_waitpid($state['pid'], $raw);
+            } while ($reaped === -1 && pcntl_get_last_error() === PCNTL_EINTR);
+            if ($reaped !== $state['pid']) {
+                throw new RuntimeException(
+                    'wait for process ' . $state['pid'] . ': ' . pcntl_strerror(pcntl_get_last_error()),
+                );
+            }
+            return pcntl_wifsignaled($raw) ? -pcntl_wtermsig($raw) : pcntl_wexitstatus($raw);
+        }
+        $interval = 1000;
+        while ($state['running']) {
+            if ($deadline !== null && hrtime(true) >= $deadline) {
+                proc_terminate($process, SIGKILL);
+                return null;
+            }
+            usleep($interval);
+            $interval = min($interval * 2, 50_000);
+            $state = proc_get_status($process);
+        }
+        return $state['signaled'] ? -$state['termsig'] : $state['exitcode'];
     }
 
     /**
@@ -147,21 +168,11 @@ final class Process
         if ($process === false) {
             throw new RuntimeException('start ' . $command[0]);
         }
-        $deadline = $timeout === null ? null : hrtime(true) + (int) ($timeout * 1e9);
-        while (true) {
-            $state = proc_get_status($process);
-            if (!$state['running']) {
-                $status = $state['signaled'] ? -$state['termsig'] : $state['exitcode'];
-                break;
-            }
-            if ($deadline !== null && hrtime(true) >= $deadline) {
-                proc_terminate($process, SIGKILL);
-                proc_close($process);
-                throw new RuntimeException($command[0] . " timed out after {$timeout} seconds");
-            }
-            usleep(2000);
-        }
+        $status = self::wait($process, $timeout === null ? null : hrtime(true) + (int) ($timeout * 1e9));
         proc_close($process);
+        if ($status === null) {
+            throw new RuntimeException($command[0] . " timed out after {$timeout} seconds");
+        }
         if ($status !== 0) {
             throw new ProcessFailedStatus($command, $status, '');
         }

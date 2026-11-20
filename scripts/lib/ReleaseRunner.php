@@ -58,3 +58,29 @@ final class SystemReleaseRunner implements ReleaseRunner
         return (int) (microtime(true) * 1e9);
     }
 }
+
+/** Release checks shared by the automation that opens a release and the job that publishes it. */
+final class ReleaseChecks
+{
+    /** Runs $command with inherited streams, failing on a non-zero status. */
+    public static function check(ReleaseRunner $runner, array $command, ?string $directory = null): void
+    {
+        $status = $runner->run($command, $directory);
+        if ($status !== 0) {
+            throw new ProcessFailedStatus($command, $status, '');
+        }
+    }
+
+    /**
+     * Whether $run is a successful quality run of exactly $sha in $repository, started by a push
+     * or a dispatch: never by a pull request, whose code may come from elsewhere.
+     */
+    public static function exactQualityRun(array $run, string $sha, string $repository): bool
+    {
+        return ($run['name'] ?? null) === 'quality'
+        && ($run['conclusion'] ?? null) === 'success'
+        && ($run['head_sha'] ?? null) === $sha
+        && ($run['head_repository']['full_name'] ?? null) === $repository
+        && in_array($run['event'] ?? null, ['push', 'workflow_dispatch'], true);
+    }
+}
