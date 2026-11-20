@@ -755,9 +755,11 @@ if ((string) getenv('FRANKENPHP') !== '') {
             array_push($command, '--worker', "{$root}/index.php,1");
         }
         if ($configured !== null) {
+            // FrankenPHP 1.3 and older start PHP only with the frankenphp global option, and 1.1
+            // gives php_server no directive order of its own.
             file_put_contents(
                 "{$directory}/Caddyfile",
-                "{\n\tadmin off\n\tauto_https off\n}\nhttp://127.0.0.1:{$port} {\n\troot * {$root}\n\tphp_server {\n\t\tenv HTTP_X_PHP_PROFILER_TRIGGER {$configured}\n\t}\n}\n",
+                "{\n\tadmin off\n\tauto_https off\n\tfrankenphp\n\torder php_server before file_server\n}\nhttp://127.0.0.1:{$port} {\n\troot * {$root}\n\tphp_server {\n\t\tenv HTTP_X_PHP_PROFILER_TRIGGER {$configured}\n\t}\n}\n",
             );
             $command = [
                 (string) getenv('FRANKENPHP'),
