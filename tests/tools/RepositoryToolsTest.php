@@ -27,6 +27,32 @@ return [
         same(['historical-evidence', 'tools'], $left);
         same('kept', file_get_contents($root . '/outside/kept'), 'a symlinked output must be unlinked, not followed:');
     },
+    'the tooling check refuses Python files, commands and dependency scans' => static function (): void {
+        // Built at runtime, so this file holds none of the strings the check refuses.
+        $py = 'py';
+        $cases = [
+            'README.md' => ['make check', 0],
+            'install.sh' => ["{$py}thon3 -m venv x", 1],
+            'setup.sh' => ["pi{$py[0]} install x", 1],
+            "tool.{$py}" => ['', 1],
+            '.github/dependabot.yml' => ["  - package-ecosystem: pi{$py[0]}\n", 1],
+            'quoted/dependabot.yml' => ["  - package-ecosystem: \"pi{$py[0]}\"\n", 1],
+            'other/dependabot.yml' => ["  - package-ecosystem: composer\n", 0],
+        ];
+        foreach ($cases as $path => [$contents, $expected]) {
+            $root = temporaryDirectory();
+            writeFile(
+                $root . '/scripts/check-tooling.sh',
+                (string) file_get_contents(ROOT . '/scripts/check-tooling.sh'),
+                0o755,
+            );
+            writeFile("{$root}/{$path}", $contents);
+            Process::check(['git', '-C', $root, 'init', '-q']);
+            Process::check(['git', '-C', $root, 'add', '.']);
+            $result = Process::run([$root . '/scripts/check-tooling.sh']);
+            same($expected, $result['status'], $path . ': ' . $result['stderr']);
+        }
+    },
     'conventional titles' => static function (): void {
         $cases = [
             'fix(api): isolate requests' => true,
