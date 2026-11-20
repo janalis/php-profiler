@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.15] - 2026-11-20
+
+### Commits
+
+- fix: reject a signed or spaced FrankenPHP version (#48)
+
 ### Fixed
 
 - A FrankenPHP module version with a sign or a leading space, such as `-1.0.0`, no longer counts as 1.13.4 or later: like any unparsable version, it keeps every `frankenphp_handle_request()` call treated as a worker's.
