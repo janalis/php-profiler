@@ -812,17 +812,31 @@ if ((string) getenv('FRANKENPHP') !== '') {
     echo "automatic FrankenPHP trigger checks passed\n";
 
     // Worker mode serves every request inside the PHP request running the worker script; each
-    // one is still its own profiler request, past the 16 sessions a request may hold.
+    // one is still its own profiler request, past the 16 sessions a request may hold. Requests
+    // alternate between a closure and a __callStatic trampoline, which the profiler resolves and
+    // releases before FrankenPHP resolves it again; the /throw request gets the trampoline.
     $workerScript = <<<'WORKER'
         <?php
+        final class WorkerHandler
+        {
+            public static Closure $handler;
+
+            public static function __callStatic(string $name, array $arguments): mixed
+            {
+                return (self::$handler)(...$arguments);
+            }
+        }
         $handler = static function (): void {
             if ($_SERVER['REQUEST_URI'] === '/throw') {
                 throw new RuntimeException('worker handler failure');
             }
             echo 'ok';
         };
+        WorkerHandler::$handler = $handler;
+        $callbacks = [$handler, [WorkerHandler::class, 'serve']];
+        $served = 0;
         $between = false;
-        while (frankenphp_handle_request($handler)) {
+        while (frankenphp_handle_request($callbacks[$served++ % 2])) {
             // A session started between requests ends before the worker waits for the next one.
             if (!$between) {
                 PhpProfiler\Profiler::start(__DIR__ . '/between.json');
