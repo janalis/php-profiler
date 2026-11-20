@@ -603,3 +603,15 @@ parsed span to hold only digits and dots. The change is again after every record
 only the source and dependency hashes renew. The bridge unit test's signed and spaced versions
 (`-1.0.0`, `v-1.0.0`, ` 1.13.4`, `+1.13.4`, `1.-13.4`, `1.13. 4`) next to the exact `1.13.4`
 boundary must kill the new comparison mutants.
+
+## 2026-11-20 FrankenPHP worker wrapper clean-ups
+
+`frankenphp_handle_request()`'s handler now wraps any argument count that FrankenPHP's registered
+signature accepts, instead of exactly one. It resolves the application's callback once and calls
+it through that cached resolution. Like PHP's own parameter parsing, it releases a `__call` or
+`__callStatic` trampoline at once, so the call resolves it again. Whether the SAPI is FrankenPHP is
+now read once at startup, by `profiler_trigger_snapshot()`, which `profiler_worker_register()` follows.
+The new code is again after every recorded coordinate, so only the source and dependency hashes
+renew. The bridge unit test's two- and three-argument calls, its `__callStatic` callback served with
+and without FrankenPHP calling back, and its registration under a stale snapshot must kill the new
+mutants.

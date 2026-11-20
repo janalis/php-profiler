@@ -441,14 +441,19 @@ static const zend_function_entry automatic_test_header_functions[] = {
     ZEND_NAMED_FE(frankenphp_request_headers, ZEND_FN(automatic_test_request_headers),
                   arginfo_automatic_headers) ZEND_FE_END};
 /* A stand-in for FrankenPHP's frankenphp_handle_request(): calls its callback once with
- * the argument 7 and returns what the callback returned. */
+ * the argument 7 and returns what the callback returned. Unlike FrankenPHP's, its signature
+ * also takes an optional, unused second argument, as a later version could. */
 static int automatic_worker_mode;
 static PHP_FUNCTION(automatic_test_handle_request) {
     zend_fcall_info fci;
     zend_fcall_info_cache fcc;
-    ZEND_PARSE_PARAMETERS_START(1, 1)
+    zval *unused = NULL;
+    ZEND_PARSE_PARAMETERS_START(1, 2)
     Z_PARAM_FUNC(fci, fcc)
+    Z_PARAM_OPTIONAL
+    Z_PARAM_ZVAL(unused)
     ZEND_PARSE_PARAMETERS_END();
+    (void)unused;
     /* Shutting down, FrankenPHP returns (5) or bails out (6) without calling the callback. */
     if (automatic_worker_mode == 5)
         RETURN_FALSE;
@@ -500,6 +505,7 @@ static PHP_FUNCTION(automatic_test_worker_handler) {
 }
 ZEND_BEGIN_ARG_INFO_EX(arginfo_automatic_handle_request, 0, 0, 1)
 ZEND_ARG_INFO(0, callback)
+ZEND_ARG_INFO(0, unused)
 ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(arginfo_automatic_worker_handler, 0, 0, 0)
 ZEND_ARG_VARIADIC_INFO(0, arguments)
@@ -523,17 +529,23 @@ static char *automatic_worker_getenv(const char *name, size_t length) {
 /* Serves one worker request whose callback is `callback`; returns its result. */
 /* Whether the last served callback was handed back for the frame to release. */
 static bool automatic_worker_released;
-static zval automatic_worker_serve(const char *callback) {
-    zval name, argument, result;
+/* Passes `count` arguments: the callback, then integers. */
+static zval automatic_worker_serve_with(const char *callback, uint32_t count) {
+    zval name, arguments[3], result;
     ZVAL_STRING(&name, "frankenphp_handle_request");
-    ZVAL_STRING(&argument, callback);
+    ZVAL_STRING(&arguments[0], callback);
+    ZVAL_LONG(&arguments[1], 1);
+    ZVAL_LONG(&arguments[2], 2);
     ZVAL_UNDEF(&result);
     automatic_worker_log[0] = 0;
-    call_user_function(NULL, NULL, &name, &result, 1, &argument);
-    automatic_worker_released = Z_REFCOUNT(argument) == 1;
+    call_user_function(NULL, NULL, &name, &result, count, arguments);
+    automatic_worker_released = Z_REFCOUNT(arguments[0]) == 1;
     zval_ptr_dtor(&name);
-    zval_ptr_dtor(&argument);
+    zval_ptr_dtor(&arguments[0]);
     return result;
+}
+static zval automatic_worker_serve(const char *callback) {
+    return automatic_worker_serve_with(callback, 1);
 }
 static bool automatic_worker_function_exists(const char *name) {
     return zend_hash_str_find_ptr(CG(function_table), name, strlen(name)) != NULL;
@@ -549,11 +561,17 @@ static bool automatic_worker_contract(void) {
     zif_handler original = handle->internal_function.handler;
     /* Other SAPIs keep FrankenPHP's function as it is. */
     sapi_module.name = "cli";
+    profiler_trigger_snapshot();
     profiler_worker_register();
     correct &= handle->internal_function.handler == original;
     correct &= !automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
     profiler_worker_unregister();
+    /* Registration reads the startup snapshot's SAPI, not the name as it is now. */
     sapi_module.name = "frankenphp";
+    profiler_worker_register();
+    correct &= handle->internal_function.handler == original;
+    profiler_worker_unregister();
+    profiler_trigger_snapshot();
     profiler_worker_register();
     correct &= handle->internal_function.handler != original;
     correct &= automatic_worker_function_exists("phpprofiler\\internal\\frankenphp_request");
@@ -586,6 +604,29 @@ static bool automatic_worker_contract(void) {
     result = automatic_worker_serve("automatic_test_worker_handler");
     correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
     correct &= !strcmp(automatic_worker_log, "ebhebhee") && profiler_worker_handler == NULL;
+    /* Any argument count FrankenPHP's signature takes is wrapped; it refuses others itself,
+     * before any request ends. */
+    result = automatic_worker_serve_with("automatic_test_worker_handler", 2);
+    correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+    correct &= !strcmp(automatic_worker_log, "ebhe") && profiler_worker_handler == NULL;
+    correct &= automatic_worker_released;
+    result = automatic_worker_serve_with("automatic_test_worker_handler", 3);
+    correct &= EG(exception) != NULL && automatic_worker_log[0] == 0;
+    zend_clear_exception();
+    zval_ptr_dtor(&result);
+    /* A __callStatic callback resolves to a trampoline, which the handler never keeps:
+     * PHP's single trampoline slot is free again even when FrankenPHP never calls back. */
+    correct &= zend_eval_string("class AutomaticTestMagic { public static function __callStatic("
+                                "$name, $arguments) { return $arguments[0] * 6; } }",
+                                NULL, "worker trampoline") == SUCCESS;
+    result = automatic_worker_serve("AutomaticTestMagic::run");
+    correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
+    correct &= !strcmp(automatic_worker_log, "ebe") && EG(trampoline).common.function_name == NULL;
+    automatic_worker_mode = 5;
+    result = automatic_worker_serve("AutomaticTestMagic::run");
+    correct &= Z_TYPE(result) == IS_FALSE && !strcmp(automatic_worker_log, "e");
+    correct &= EG(trampoline).common.function_name == NULL && automatic_worker_released;
+    automatic_worker_mode = 0;
     /* FrankenPHP rejects a missing or non-callable argument itself, before any request. */
     zval handle_name;
     ZVAL_STRING(&handle_name, "frankenphp_handle_request");
@@ -977,6 +1018,7 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
                                           MODULE_PERSISTENT) == SUCCESS;
         sapi_module.name = "frankenphp";
+        profiler_trigger_snapshot();
         profiler_worker_register();
         automatic_worker_mode = 3;
         volatile bool bailed = false;
@@ -990,6 +1032,7 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
                                           MODULE_PERSISTENT) == SUCCESS;
         sapi_module.name = "frankenphp";
+        profiler_trigger_snapshot();
         profiler_worker_register();
         automatic_worker_mode = 6;
         volatile bool bailed = false;
@@ -1004,6 +1047,7 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
                                           MODULE_PERSISTENT) == SUCCESS;
         sapi_module.name = "frankenphp";
+        profiler_trigger_snapshot();
         profiler_worker_register();
         profiler_worker_environment = true;
         sapi_module.getenv = automatic_worker_getenv;
