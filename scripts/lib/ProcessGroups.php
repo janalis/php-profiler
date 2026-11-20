@@ -89,9 +89,8 @@ final class ProcessGroups
             C);
         $this->waitNoWait = PHP_OS_FAMILY === 'Darwin' ? 0x20 : 0x01000000;
         if (PHP_OS_FAMILY === 'Linux') {
-            $this->linux = FFI::cdef(
-                'int prctl(int option, void *a, unsigned long b, unsigned long c, unsigned long d);',
-            );
+            // glibc declares prctl variadic: one declaration serves the pointer and integer calls.
+            $this->linux = FFI::cdef('int prctl(int option, ...);');
             $previous = $this->linux->new('int');
             if ($this->linux->prctl(self::PR_GET_CHILD_SUBREAPER, FFI::addr($previous), 0, 0, 0) !== 0) {
                 throw new RuntimeException('read child-subreaper scope');
@@ -188,10 +187,7 @@ final class ProcessGroups
 
     private function setSubreaper(int $value, string $action): void
     {
-        $linux = FFI::cdef(
-            'int prctl(int option, unsigned long a, unsigned long b, unsigned long c, unsigned long d);',
-        );
-        if ($linux->prctl(self::PR_SET_CHILD_SUBREAPER, $value, 0, 0, 0) !== 0) {
+        if ($this->linux?->prctl(self::PR_SET_CHILD_SUBREAPER, $value, 0, 0, 0) !== 0) {
             throw new RuntimeException($action);
         }
     }

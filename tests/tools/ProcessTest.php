@@ -19,6 +19,21 @@ return [
     'a signal death is a negative status' => static function (): void {
         same(-SIGTERM, Process::run(['sh', '-c', 'kill -TERM $$'])['status']);
     },
+    'a slow child keeps its status whether waited for or polled' => static function (): void {
+        // Without a timeout the child is waited for; with one it is polled.
+        foreach ([null, 10.0] as $timeout) {
+            same(3, Process::run(['sh', '-c', 'sleep 0.2; exit 3'], timeout: $timeout)['status']);
+            same(-SIGTERM, Process::run(['sh', '-c', 'sleep 0.2; kill -TERM $$'], timeout: $timeout)['status']);
+        }
+        same(
+            5,
+            throws(ProcessFailedStatus::class, static fn() => Process::check([
+                'sh',
+                '-c',
+                'sleep 0.2; exit 5',
+            ]))->status,
+        );
+    },
     'a timeout kills the child and keeps partial output' => static function (): void {
         $started = hrtime(true);
         $result = Process::run(['sh', '-c', 'printf partial; exec sleep 30'], timeout: 0.5);
