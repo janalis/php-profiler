@@ -632,6 +632,13 @@ static bool automatic_worker_contract(void) {
     correct &= profiler_worker_environment_version("v1.13.4");
     correct &= !profiler_worker_environment_version("v1.13.3");
     correct &= !profiler_worker_environment_version("vv1.13.4");
+    correct &= !profiler_worker_environment_version("-1.0.0");
+    correct &= !profiler_worker_environment_version("v-1.0.0");
+    correct &= !profiler_worker_environment_version(" 1.13.4");
+    correct &= !profiler_worker_environment_version("+1.13.4");
+    correct &= !profiler_worker_environment_version("1.-13.4");
+    correct &= !profiler_worker_environment_version("1.13. 4");
+    correct &= profiler_worker_environment_version("1.13.4-dev");
     correct &= profiler_worker_environment_version("1.13.6-dev");
     correct &= profiler_worker_environment_version("1.14.0");
     correct &= profiler_worker_environment_version("2.0.0");
