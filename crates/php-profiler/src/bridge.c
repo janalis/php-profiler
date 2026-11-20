@@ -363,12 +363,16 @@ static int profiler_request_getenv;
 /* 0 when the SAPI is trusted or PHP started without HTTP_X_PHP_PROFILER_TRIGGER, 1 when a
  * distrusted SAPI started with it and that is not yet reported, 2 once reported. */
 static atomic_int profiler_inherited_trigger;
-/* Runs at module startup, before any ZTS request thread can putenv() and rewrite environ. */
+/* Whether the SAPI is FrankenPHP, as the last startup snapshot found. */
+static bool profiler_frankenphp;
+/* Runs at module startup, before any ZTS request thread can putenv() and rewrite environ,
+ * and before profiler_worker_register(), which reads profiler_frankenphp. */
 void profiler_trigger_snapshot(void) {
+    profiler_frankenphp = profiler_sapi_in("|frankenphp|");
     /* FrankenPHP's _SERVER starts from the process environment and ends with its
      * configured `env` values, so only its header function is request-owned. */
     profiler_request_headers =
-        profiler_sapi_in("|frankenphp|")
+        profiler_frankenphp
             ? zend_hash_str_find_ptr(CG(function_table), ZEND_STRL("frankenphp_request_headers"))
             : NULL;
     profiler_trusted_sapi = profiler_request_headers != NULL ||
@@ -474,23 +478,33 @@ extern void profiler_worker_request_end(void);
 #define PROFILER_WORKER_CALLBACK "PhpProfiler\\Internal\\frankenphp_request"
 static zend_function *profiler_handle_request_function;
 static zif_handler profiler_handle_request_original;
-/* The application's callback for the innermost frankenphp_handle_request() call. */
-ZEND_TLS zval *profiler_worker_handler;
+/* The application's callback, resolved once by the frankenphp_handle_request() call that
+ * armed it. A __call or __callStatic trampoline is not kept, as in PHP's own parameter
+ * parsing: FrankenPHP may never call back, and the call resolves it again. */
+typedef struct {
+    zend_fcall_info fci;
+    zend_fcall_info_cache fcc;
+} profiler_worker_call;
+/* The callback of the innermost frankenphp_handle_request() call. */
+ZEND_TLS profiler_worker_call *profiler_worker_handler;
 static ZEND_FUNCTION(profiler_worker_callback) {
     /* Every argument is variadic, so the frame holds them all in order. */
     uint32_t count = ZEND_NUM_ARGS();
     zval *arguments = ZEND_CALL_ARG(execute_data, 1);
     /* Each frankenphp_handle_request() call arms the callback once: a direct call from the
      * application's callback finds it disarmed instead of restarting the request. */
-    zval *handler = profiler_worker_handler;
+    profiler_worker_call *call = profiler_worker_handler;
     profiler_worker_handler = NULL;
-    if (!handler) {
+    if (!call) {
         zend_throw_error(NULL, "%s() runs only as frankenphp_handle_request()'s callback",
                          PROFILER_WORKER_CALLBACK);
         return;
     }
+    call->fci.retval = return_value;
+    call->fci.params = arguments;
+    call->fci.param_count = count;
     profiler_worker_request_begin();
-    zend_try { call_user_function(NULL, NULL, handler, return_value, count, arguments); }
+    zend_try { zend_call_function(&call->fci, &call->fcc); }
     zend_catch {
         /* A fatal error still ends the request first, as PHP's request shutdown would. */
         profiler_worker_request_end();
@@ -508,9 +522,10 @@ static const zend_function_entry profiler_worker_functions[] = {
 /* The callback's interned name, which FrankenPHP's frame may hold without owning it. */
 static zend_string *profiler_worker_callback_name;
 /* Hands the frame the application's callback back and restores the enclosing call's. */
-static void profiler_worker_restore(zval *argument, zval *handler, zval *previous) {
+static void profiler_worker_restore(zval *argument, profiler_worker_call *call,
+                                    profiler_worker_call *previous) {
     profiler_worker_handler = previous;
-    ZVAL_COPY_VALUE(argument, handler);
+    ZVAL_COPY_VALUE(argument, &call->fci.function_name);
 }
 /* Whether FrankenPHP's getenv hook also answers from the worker script's environment, as it
  * does from 1.13.4; set when the handler is installed. */
@@ -544,33 +559,37 @@ static bool profiler_worker_request(void) {
            zend_hash_str_exists(Z_ARRVAL_P(server), ZEND_STRL("FRANKENPHP_WORKER"));
 }
 static ZEND_NAMED_FUNCTION(profiler_handle_request) {
-    /* FrankenPHP rejects any other call itself, including every call outside worker mode:
-     * that request's capture must not end before the refusal. */
-    bool wrap = ZEND_NUM_ARGS() == 1;
+    /* FrankenPHP rejects any call its own signature does not accept, a callback that is not
+     * callable, and every call outside worker mode: that request's capture must not end
+     * before the refusal. Its signature has one parameter, the callback; a later optional
+     * one is accepted as its arginfo declares it. */
+    uint32_t count = ZEND_NUM_ARGS();
+    bool wrap = count >= 1 && count <= EX(func)->common.num_args;
     zval *argument = ZEND_CALL_ARG(execute_data, 1);
+    profiler_worker_call call;
     if (wrap)
-        wrap = zend_is_callable(argument, 0, NULL);
-    if (wrap)
+        wrap = zend_fcall_info_init(argument, 0, &call.fci, &call.fcc, NULL, NULL) == SUCCESS;
+    if (wrap) {
+        zend_release_fcall_info_cache(&call.fcc);
         wrap = profiler_worker_request();
+    }
     if (!wrap) {
         profiler_handle_request_original(execute_data, return_value);
         return;
     }
-    zval handler;
-    ZVAL_COPY_VALUE(&handler, argument);
     ZVAL_INTERNED_STR(argument, profiler_worker_callback_name);
-    zval *previous = profiler_worker_handler;
-    profiler_worker_handler = &handler;
+    profiler_worker_call *previous = profiler_worker_handler;
+    profiler_worker_handler = &call;
     /* End the worker script's start, or what ran since the last request, before FrankenPHP
      * waits for the next one: the wait belongs to no request. */
     profiler_worker_request_end();
     zend_try { profiler_handle_request_original(execute_data, return_value); }
     zend_catch {
-        profiler_worker_restore(argument, &handler, previous);
+        profiler_worker_restore(argument, &call, previous);
         zend_bailout();
     }
     zend_end_try();
-    profiler_worker_restore(argument, &handler, previous);
+    profiler_worker_restore(argument, &call, previous);
 }
 /* Runs at module startup, like FrankenPHP's own getenv() override. A callback name another
  * extension already took leaves worker requests uncaptured: Zend reports the duplicate. */
@@ -580,7 +599,7 @@ void profiler_worker_register(void) {
         zend_hash_str_find_ptr(&module_registry, ZEND_STRL("frankenphp"));
     profiler_worker_environment =
         profiler_worker_environment_version(frankenphp ? frankenphp->version : NULL);
-    if (!profiler_sapi_in("|frankenphp|"))
+    if (!profiler_frankenphp)
         return;
     zend_function *function =
         zend_hash_str_find_ptr(CG(function_table), ZEND_STRL("frankenphp_handle_request"));
