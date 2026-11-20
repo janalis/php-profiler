@@ -725,6 +725,8 @@ if ((string) getenv('FRANKENPHP') !== '') {
     check(preg_match('/^FrankenPHP v?(\d+\.\d+\.\d+)\b/', $frankenphpVersion, $release) === 1, $frankenphpVersion);
     $frankenphpRelease = $release[1];
     echo "automatic FrankenPHP version {$frankenphpRelease}\n";
+    // frankenphp_request_headers() arrived in 1.1; earlier releases expose headers through _SERVER.
+    $headersOnly = version_compare($frankenphpRelease, '1.1.0', '>=');
     /**
      * Serves root/ with php-server, or through a Caddyfile when $configured names an env value.
      * A $worker script serves every request from one worker thread; a $script replaces the
@@ -797,24 +799,40 @@ if ((string) getenv('FRANKENPHP') !== '') {
         if ($inherited !== null) {
             $environment['HTTP_X_PHP_PROFILER_TRIGGER'] = $inherited;
         }
+        $tokens = [null, 'wrong', 'franken-secret', 'franken-secret'];
+        if ($headersOnly) {
+            // Only real headers capture: neither an inherited nor a configured env value stands
+            // in for a missing one, and neither is reported.
+            $expected = [false, false, true, true];
+        } elseif ($inherited !== null) {
+            // Before 1.1 _SERVER starts from the process environment: an inherited value
+            // could stand in for every header, so trigger mode ignores every request.
+            $expected = [false, false, false, false];
+        } elseif ($configured !== null) {
+            // A configured env value ends _SERVER, and PHP started without it, so it answers
+            // for every request. FrankenPHP 1.0 crashes on a header that an env value
+            // overrides, so only requests without one are sent.
+            $tokens = [null, null];
+            $expected = [true, true];
+        } else {
+            $expected = [false, false, true, true];
+        }
         $directory = ExceptionFixture::temporaryDirectory('profiler-franken-');
         [$process, $port] = $frankenphp($directory, $environment, $configured);
         try {
-            $captured = array_map(static fn(?string $token): bool => serverRequest($port, $token) !== null, [
-                null,
-                'wrong',
-                'franken-secret',
-                'franken-secret',
-            ]);
+            $captured = array_map(static fn(?string $token): bool => serverRequest($port, $token) !== null, $tokens);
         } catch (Throwable $failure) {
             $stopFrankenphp($process, $failure);
         }
         $log = $stopFrankenphp($process);
-        // Only real headers capture: neither an inherited nor a configured env value stands
-        // in for a missing one, and neither is reported.
-        check($captured === [false, false, true, true], $inherited, $configured, $captured, $log);
-        check(count(reports($directory)) === 2, $inherited, $configured);
-        check(!str_contains($log, INHERITED), $inherited, $configured, $log);
+        check($captured === $expected, $frankenphpRelease, $inherited, $configured, $captured, $log);
+        check(count(reports($directory)) === count(array_filter($expected)), $inherited, $configured);
+        check(
+            substr_count($log, INHERITED) === ($headersOnly || $inherited === null ? 0 : 1),
+            $inherited,
+            $configured,
+            $log,
+        );
     }
     echo "automatic FrankenPHP trigger checks passed\n";
 

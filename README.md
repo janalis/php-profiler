@@ -184,6 +184,7 @@ SAPIs outside a request (LiteSpeed's command-line mode, `php-fpm -i`). Every
 other SAPI may read the process environment as a header (`php-cgi` falls back to it for
 missing FastCGI parameters; phpdbg, embed, phpmicro and FrankenPHP before 1.1 expose it), so when the
 environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores
-every request under these SAPIs and logs that once per process. A variable a host sets after PHP starts is not detected.
+every request under these SAPIs and logs that once per process. On FrankenPHP before 1.1, an `env` setting for
+the trigger header answers for every request. A variable a host sets after PHP starts is not detected.
 Classic CGI, where the web server passes headers through the environment, is not supported. Combined/comma-separated
 trigger values are rejected.
