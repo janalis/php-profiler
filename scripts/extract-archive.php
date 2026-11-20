@@ -41,6 +41,7 @@ $replace = static function (string $path, string $name): void {
         fail('archive member replaces a directory: ' . $name);
     }
 };
+$links = [];
 foreach (Tar::read($contents) as $entry) {
     $name = $entry['name'];
     if ($name === '' || str_starts_with($name, '/') || in_array('..', explode('/', $name), true)) {
@@ -73,8 +74,16 @@ foreach (Tar::read($contents) as $entry) {
             $directory(dirname($target), $name);
             $replace($target, $name);
             symlink($entry['link'], $target) || fail('cannot create archive link: ' . $name);
+            $links[$name] = $target;
             break;
         default:
             fail('archive member is not a regular file, directory or symlink: ' . $name);
+    }
+}
+// Each link was checked against the tree as it was then; a later link can redirect an
+// earlier one (a -> p/q/../.., then p -> .), so every surviving link is checked again.
+foreach ($links as $name => $target) {
+    if (is_link($target) && !$inside(Paths::resolve(dirname($target) . '/' . readlink($target)))) {
+        fail('archive link leaves the destination: ' . $name);
     }
 }

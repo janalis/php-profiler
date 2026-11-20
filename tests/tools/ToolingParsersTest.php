@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/support.php';
 require_once dirname(__DIR__, 2) . '/scripts/lib/Arguments.php';
+require_once dirname(__DIR__, 2) . '/scripts/lib/Tar.php';
 require_once dirname(__DIR__, 2) . '/scripts/lib/Toml.php';
 
 use PhpProfiler\Tooling\Arguments;
 use PhpProfiler\Tooling\Json;
 use PhpProfiler\Tooling\Process;
+use PhpProfiler\Tooling\Tar;
 use PhpProfiler\Tooling\Toml;
 
 return [
@@ -36,5 +38,19 @@ return [
         $root = temporaryDirectory();
         $result = Process::run([ROOT . '/scripts/php-tool.sh', ROOT . '/scripts/coverage-snapshot.php', $root]);
         same([0, "{}\n"], [$result['status'], $result['stdout']], $result['stderr']);
+    },
+    'a pax record must advance past its length prefix and end in a newline, like tarfile' => static function (): void {
+        // Tar::write emits file data only, so a pax header is a file entry retyped to 'x'.
+        $archive = static function (string $records): string {
+            $pax = Tar::write([['name' => 'pax', 'data' => $records]]);
+            $header = substr_replace(substr($pax, 0, 512), 'x', 156, 1);
+            $header = substr_replace($header, '        ', 148, 8);
+            $header = substr_replace($header, sprintf('%06o', array_sum(unpack('C*', $header))) . "\0 ", 148, 8);
+            return $header . substr($pax, 512, -1024) . Tar::write([['name' => 'original', 'data' => 'x']]);
+        };
+        same(['renamed'], array_column(Tar::read($archive("16 path=renamed\n")), 'name'));
+        foreach (["0 x=y\n", "2 x=y\n", "99 x=y\n", "7 x=yz \n7 a=b \n", "6 abc\n"] as $records) {
+            throws(InvalidArgumentException::class, static fn() => Tar::read($archive($records)));
+        }
     },
 ];

@@ -131,7 +131,8 @@ final class Paths
      */
     public static function copyTree(string $source, string $target, array $ignored = []): void
     {
-        if (!is_dir($target) && !mkdir($target, 0o777, true) && !is_dir($target)) {
+        // @: another process may create it first, which Strict.php would otherwise make fatal.
+        if (!is_dir($target) && !@mkdir($target, 0o777, true) && !is_dir($target)) {
             throw new \RuntimeException('create ' . $target);
         }
         foreach (scandir($source) ?: throw new \RuntimeException('read ' . $source) as $name) {
@@ -171,7 +172,7 @@ final class Paths
     /** Like shutil.copy2(): contents, permissions and modification time. */
     public static function copyFile(string $source, string $target): void
     {
-        if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0o777, true) && !is_dir(dirname($target))) {
+        if (!is_dir(dirname($target)) && !@mkdir(dirname($target), 0o777, true) && !is_dir(dirname($target))) {
             throw new \RuntimeException('create ' . dirname($target));
         }
         if (

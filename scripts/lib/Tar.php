@@ -162,8 +162,15 @@ final class Tar
                 throw new InvalidArgumentException('invalid pax record');
             }
             $length = (int) $match[1];
+            // The length covers its own prefix and the newline: a shorter one never advances.
+            if ($length <= strlen($match[0]) || $length > strlen($data) || $data[$length - 1] !== "\n") {
+                throw new InvalidArgumentException('invalid pax record length');
+            }
             $record = substr($data, strlen($match[0]), $length - strlen($match[0]) - 1);
-            [$key, $value] = array_pad(explode('=', $record, 2), 2, '');
+            if (!str_contains($record, '=')) {
+                throw new InvalidArgumentException('invalid pax record');
+            }
+            [$key, $value] = explode('=', $record, 2);
             $records[$key] = $value;
             $data = substr($data, $length);
         }

@@ -153,6 +153,12 @@ return [
             [['name' => '../escape', 'data' => 'x']],
             [['name' => 'source/link', 'type' => 'symlink', 'link' => '../../outside']],
             [['name' => 'source/device', 'type' => 'other']],
+            // Each link is inside when written; the second makes the first leave.
+            [
+                ['name' => 'q', 'type' => 'directory'],
+                ['name' => 'a', 'type' => 'symlink', 'link' => 'p/q/../..'],
+                ['name' => 'p', 'type' => 'symlink', 'link' => '.'],
+            ],
         ] as $index => $entries) {
             writeFile("{$root}/bad{$index}.tar.gz", (string) gzencode(Tar::write($entries)));
             $result = Process::run([
