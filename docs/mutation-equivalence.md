@@ -594,3 +594,12 @@ source and dependency hashes renew. The bridge unit test's version boundaries, i
 `frankenphp` module, its name-aware getenv stand-in (environment, `_SERVER` alone, neither, a
 `_SERVER` that is not an array, an older version, no hook), the isolated `worker-materialize`
 bailout mode, and the FrankenPHP classic-mode integration check must kill the new mutants.
+
+## 2026-11-20 Signed FrankenPHP versions
+
+`sscanf("%u")` accepts a sign or leading space in each field, so a FrankenPHP version such as
+`-1.0.0` parsed as a huge major and counted as 1.13.4 or later. The parser now also requires the
+parsed span to hold only digits and dots. The change is again after every recorded coordinate, so
+only the source and dependency hashes renew. The bridge unit test's signed and spaced versions
+(`-1.0.0`, `v-1.0.0`, ` 1.13.4`, `+1.13.4`, `1.-13.4`, `1.13. 4`) next to the exact `1.13.4`
+boundary must kill the new comparison mutants.

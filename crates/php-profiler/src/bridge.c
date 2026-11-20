@@ -519,9 +519,12 @@ static bool profiler_worker_environment;
  * after a "v" and before any suffix, is 1.13.4 or later. An unknown version is not. */
 static bool profiler_worker_environment_version(const char *version) {
     unsigned major, minor, patch;
+    int parsed;
     if (version && *version == 'v')
         version++;
-    if (!version || sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3)
+    /* %u also takes a sign or leading space, which would turn "-1.0.0" into a huge major. */
+    if (!version || sscanf(version, "%u.%u.%u%n", &major, &minor, &patch, &parsed) != 3 ||
+        strspn(version, "0123456789.") < (size_t)parsed)
         return false;
     return major > 1 || (major == 1 && (minor > 13 || (minor == 13 && patch >= 4)));
 }
