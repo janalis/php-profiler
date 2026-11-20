@@ -15,6 +15,17 @@ return [
         Paths::removeTree("{$root}/tree");
         same([false, 'kept'], [file_exists("{$root}/tree"), file_get_contents("{$root}/outside/kept")]);
     },
+    'remove tree deletes special files and a dangling symlink, like a php-cgi socket' => static function (): void {
+        $root = temporaryDirectory();
+        mkdir("{$root}/tree");
+        // A FIFO stands in for php-cgi's listening socket: is_file() is false for both, and a
+        // socket path under a long temporary directory exceeds the 103-byte limit.
+        same(true, posix_mkfifo("{$root}/tree/cgi.fifo", 0o600));
+        symlink("{$root}/missing", "{$root}/tree/dangling");
+        same(['cgi.fifo', 'dangling'], array_values(array_diff(scandir("{$root}/tree"), ['.', '..'])));
+        Paths::removeTree("{$root}/tree");
+        same(false, file_exists("{$root}/tree"));
+    },
     'resolve matches pathlib for missing components and parent steps' => static function (): void {
         $root = temporaryDirectory();
         mkdir("{$root}/real");
