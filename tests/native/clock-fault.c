@@ -6,10 +6,17 @@
 #include <dlfcn.h>
 #include <string.h>
 #include <stdint.h>
-static int failing_clock_gettime(clockid_t id, struct timespec *value) {
+/* Fault only the profiler's own reads. PHP 8.6 checks CLOCK_MONOTONIC at startup and
+ * aborts when it fails, before the profiler under test is even loaded. */
+static int called_from_profiler(const void *caller) {
+    Dl_info info;
+    return dladdr(caller, &info) && info.dli_fname && strstr(info.dli_fname, "libphp_profiler.");
+}
+static int failing_clock_gettime_from(const void *caller, clockid_t id, struct timespec *value) {
     const char *mode = getenv("PROFILER_TEST_CLOCK");
-    if (mode && ((mode[0] == 'c' && id == CLOCK_THREAD_CPUTIME_ID) ||
-                 (mode[0] == 'w' && id == CLOCK_MONOTONIC))) {
+    if (mode && called_from_profiler(caller) &&
+        ((mode[0] == 'c' && id == CLOCK_THREAD_CPUTIME_ID) ||
+         (mode[0] == 'w' && id == CLOCK_MONOTONIC))) {
         value->tv_sec = 0;
         value->tv_nsec = 0;
         if (strstr(mode, "zero")) {
@@ -57,6 +64,9 @@ static int failing_clock_gettime(clockid_t id, struct timespec *value) {
 #endif
 }
 #ifdef __APPLE__
+static int failing_clock_gettime(clockid_t id, struct timespec *value) {
+    return failing_clock_gettime_from(__builtin_return_address(0), id, value);
+}
 __attribute__((used)) static struct {
     const void *replacement;
     const void *original;
@@ -74,5 +84,7 @@ void *dlopen(const char *name, int flags) {
         flags &= ~RTLD_DEEPBIND;
     return original(name, flags);
 }
-int clock_gettime(clockid_t id, struct timespec *value) { return failing_clock_gettime(id, value); }
+int clock_gettime(clockid_t id, struct timespec *value) {
+    return failing_clock_gettime_from(__builtin_return_address(0), id, value);
+}
 #endif

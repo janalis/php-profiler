@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.3', '8.4', '8.5']
+        php: ['8.3', '8.4', '8.5', '8.6']
         zts: ['nts', 'ts']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -186,7 +186,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.3', '8.4', '8.5']
+        php: ['8.3', '8.4', '8.5', '8.6']
         sapi: ['cli', 'zts', 'fpm', 'apache', 'frankenphp']
         # Older FrankenPHP releases, where a refused call outside worker mode still ends the
         # capture (before 1.13.4), down to 1.1, the first with frankenphp_request_headers(), and 1.0,
@@ -200,6 +200,13 @@ jobs:
             sapi: 'frankenphp-1.1.5'
           - php: '8.3'
             sapi: 'frankenphp-1.0.3'
+        # The official 8.6 images build every SAPI with --enable-zts, so there is no php:8.6-zts
+        # tag and the 8.6 cli cell is the ZTS one. FrankenPHP has no build on PHP 8.6 yet.
+        exclude:
+          - php: '8.6'
+            sapi: 'zts'
+          - php: '8.6'
+            sapi: 'frankenphp'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: scripts/docker-matrix.sh
@@ -460,6 +467,8 @@ jobs:
           - php: '8.3'
             zts: nts
           - php: '8.5'
+            zts: ts
+          - php: '8.6'
             zts: ts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
