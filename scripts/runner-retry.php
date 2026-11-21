@@ -23,28 +23,50 @@ if (
 }
 [$repository, $runId] = $positionals;
 
-$api = static fn(string $path): array => json_decode(
+$get = static fn(string $path): mixed => json_decode(
     Process::output(['gh', 'api', "repos/{$repository}/{$path}"]),
     true,
     flags: JSON_THROW_ON_ERROR,
 );
-$run = $api("actions/runs/{$runId}");
-$jobs = $api("actions/runs/{$runId}/attempts/{$run['run_attempt']}/jobs?per_page=100")['jobs'];
-$branch = (string) ($run['head_branch'] ?? '');
-$branchHead = null;
-if ($branch !== '') {
-    $status = Process::run([
+$branchHead = static function (string $branch) use ($repository): ?string {
+    if ($branch === '') {
+        return null;
+    }
+    $result = Process::run([
         'gh',
         'api',
         "repos/{$repository}/branches/" . rawurlencode($branch),
         '--jq',
         '.commit.sha',
     ]);
-    $branchHead = $status['status'] === 0 ? trim($status['stdout']) : null;
-}
-if (!RunnerRetry::shouldRerun($run, $jobs, $repository, $branchHead)) {
-    echo "quality run {$runId} attempt {$run['run_attempt']}: no rerun\n";
-    exit(0);
-}
-Process::check(['gh', 'api', '--method', 'POST', "repos/{$repository}/actions/runs/{$runId}/rerun-failed-jobs"]);
-echo "quality run {$runId} attempt {$run['run_attempt']}: rerunning jobs that never got a runner\n";
+    return $result['status'] === 0 ? trim($result['stdout']) : null;
+};
+echo
+    RunnerRetry::retry(
+        (int) $runId,
+        $repository,
+        $get,
+        $branchHead,
+        static fn() => Process::check([
+            'gh',
+            'api',
+            '--method',
+            'POST',
+            "repos/{$repository}/actions/runs/{$runId}/rerun-failed-jobs",
+        ]),
+        static fn() => Process::check([
+            'gh',
+            'workflow',
+            'run',
+            'release.yml',
+            '--repo',
+            $repository,
+            '--ref',
+            'main',
+            '-f',
+            "quality_run_id={$runId}",
+        ]),
+        static fn(int $seconds) => sleep($seconds),
+    ),
+    "\n"
+;
