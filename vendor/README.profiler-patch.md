@@ -1,17 +1,16 @@
 # ext-php-rs bailout ownership patch
 
-`ext-php-rs/` is the published ext-php-rs 0.16.4 source, licensed under its
+`ext-php-rs/` is the published ext-php-rs 0.16.5 source, licensed under its
 included MIT and Apache-2.0 license files. The crates.io archive SHA-256 is
-`af52a43b4a06ff1aa4068018c15e7480f7cab2ecb1231710497686587a964156`.
+`c1d72e0a34c9c88383f784dc538404d5ed1b3a3451245fe7a3c05b78a859c8f1`.
 
-The workspace patches `PhpException::throw` in `src/exception.rs` and the
-uncloneable-object error branch in `src/zend/handlers.rs`. The upstream implementation retained Rust-owned
-exception and fallback strings on the stack while Zend could allocate and
-bail out. A Zend longjmp does not run their Rust destructors. The local patch
-registers the exception, escaped message, and formatted fallback with
-ext-php-rs's existing bailout cleanup mechanism. The class name is a borrowed
-`&str`; reachable fallback errors have no heap-owned payload, so neither
-requires an ownership box.
+The workspace patches `PhpException::throw` in `src/exception.rs`. The upstream
+implementation retained Rust-owned exception and fallback strings on the stack
+while Zend could allocate and bail out. A Zend longjmp does not run their Rust
+destructors. The local patch registers the exception, escaped message, and
+formatted fallback with ext-php-rs's existing bailout cleanup mechanism. The
+class name is a borrowed `&str`; reachable fallback errors have no heap-owned
+payload, so neither requires an ownership box.
 Normal return and already-pending exception behavior remain unchanged.
 No cargo registry cache files are edited.
 
@@ -92,6 +91,19 @@ unviable builds or timeouts. Raw artifacts are at
 check is not counted as a fourth ownership guard or as whole-dependency MSI.
 
 ## Uncloneable-object bailout ownership
+
+Up to 0.16.4 the workspace also patched the uncloneable-object branch of the
+clone handler in `src/zend/handlers.rs`. Upstream 0.16.5 (extphprs/ext-php-rs#838)
+fixed it the same way: a static `%s` format with the Zend-owned class name, so
+no Rust-owned message is held across `zend_throw_error`. That file is now
+unmodified upstream source. Upstream names the object's own class, which for a
+PHP subclass is the subclass. The profiler's `Profiler` and `Session` classes are
+final and its exception classes cannot be cloned, so its messages are unchanged. The clone tests below still run against the
+upstream handler, and the `clone_message` mutant still restores the old owned
+message, so a regression upstream would fail them.
+
+The history of the former local patch follows.
+
 
 The upstream clone handler constructs an owned Rust `CString` before calling
 `zend_throw_error`. This handler is called directly by Zend, outside the

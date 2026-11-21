@@ -1,6 +1,6 @@
 # Unsafe integration inventory and review boundaries
 
-This inventory records reviewed assumptions and evidence, not a whole-extension safety clearance. The Zend-independent engine uses safe Rust. The native adapter depends on the exact PHP build and the ext-php-rs 0.16.4 / derive 0.12.4 behavior, including the local exception-ownership patch documented in `vendor/README.profiler-patch.md`.
+This inventory records reviewed assumptions and evidence, not a whole-extension safety clearance. The Zend-independent engine uses safe Rust. The native adapter depends on the exact PHP build and the ext-php-rs 0.16.5 / derive 0.12.5 behavior, including the local exception-ownership patch documented in `vendor/README.profiler-patch.md`.
 
 ## Native boundary inventory
 
