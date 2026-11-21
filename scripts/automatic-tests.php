@@ -778,7 +778,14 @@ if ((string) getenv('FRANKENPHP') !== '') {
             $root,
         );
         try {
-            $process->waitUntil(static fn(): bool => HttpClient::accepts($port), 'FrankenPHP');
+            // FrankenPHP 1.3 can accept connections before it registers its workers, and then
+            // runs a worker script as a classic one; it logs that it started once they are.
+            $process->waitUntil(
+                static fn(): bool => (
+                    HttpClient::accepts($port) && str_contains($process->log(), '"msg":"FrankenPHP started')
+                ),
+                'FrankenPHP',
+            );
         } catch (Throwable $failure) {
             throw new RuntimeException($failure->getMessage() . "\n" . $process->stop(SIGINT), 0, $failure);
         }
