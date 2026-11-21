@@ -22,7 +22,7 @@ run_fpm_suite() {
   docker run --rm "$image" scripts/php-tool.sh scripts/automatic-tests.php --fpm | tee "$compatibility/${version}-${sapi}-automatic.log"
   docker run --rm "$image" scripts/php-tool.sh scripts/fpm-test.php | tee "$compatibility/${version}-${sapi}-fpm.log"
   docker run --rm "$image" scripts/php-tool.sh scripts/sampling-jit-tests.php --fpm \
-    --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts nts \
+    --extension /profiler/target/release/libphp_profiler.so --expected-php "$version" --expected-zts "$expected_zts" \
     | tee "$compatibility/${version}-${sapi}-sampling-jit-reuse.json"
   docker run --rm "$image" scripts/php-tool.sh scripts/fpm-recovery-test.php | tee "$compatibility/${version}-${sapi}-fpm-recovery.json"
   docker run --rm "$image" scripts/php-tool.sh scripts/fpm-vendor-ownership-test.php | tee "$compatibility/${version}-${sapi}-fpm-vendor-ownership.json"
@@ -34,14 +34,15 @@ run_fpm_suite() {
     jit_requirement=()
     if [[ "$fpm_mode" == jit || "$fpm_mode" == preload-jit ]]; then jit_requirement=(--require-jit); fi
     docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" scripts/php-tool.sh scripts/fpm-closure-tests.php \
-      --mode "$fpm_mode" --expected-php "$version" --expected-zts nts ${jit_requirement[@]+"${jit_requirement[@]}"} | tee "$compatibility/${version}-${sapi}-closure-${fpm_mode}.json"
+      --mode "$fpm_mode" --expected-php "$version" --expected-zts "$expected_zts" ${jit_requirement[@]+"${jit_requirement[@]}"} | tee "$compatibility/${version}-${sapi}-closure-${fpm_mode}.json"
   done
   docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" scripts/php-tool.sh scripts/fpm-closure-tests.php \
-    --mode preload-jit --require-jit --workers 4 --expected-php "$version" --expected-zts nts | tee "$compatibility/${version}-${sapi}-closure-preload-jit-four-workers.json"
+    --mode preload-jit --require-jit --workers 4 --expected-php "$version" --expected-zts "$expected_zts" | tee "$compatibility/${version}-${sapi}-closure-preload-jit-four-workers.json"
 }
 for version in ${PHP_VERSIONS:-8.3 8.4 8.5 8.6}; do
   for sapi in ${PHP_SAPIS:-cli zts fpm apache frankenphp}; do
-    # Neither php:8.6-zts nor a FrankenPHP build on PHP 8.6 is published yet.
+    # The official 8.6 images are all ZTS, so there is no php:8.6-zts tag; FrankenPHP has no
+    # build on PHP 8.6 yet.
     if [[ "$version" == 8.6 && ( "$sapi" == zts || "$sapi" == frankenphp* ) ]]; then
       echo "skip ${version}-${sapi}: no upstream image" >&2
       continue
@@ -58,6 +59,8 @@ for version in ${PHP_VERSIONS:-8.3 8.4 8.5 8.6}; do
     docker build -f "$snapshot/tests/docker/Dockerfile" --build-arg "PHP_IMAGE=$php_image" -t "$image" "$snapshot"
     expected_zts=nts
     if [[ "$sapi" == zts || "$sapi" == frankenphp* ]]; then expected_zts=ts; fi
+    # From 8.6 the official images build every SAPI with --enable-zts.
+    case "$version" in 8.3 | 8.4 | 8.5) ;; *) expected_zts=ts ;; esac
     docker run --rm "$image" scripts/php-tool.sh scripts/php-environment-check.php --version "$version" --zts "$expected_zts" \
       | tee "$compatibility/${version}-${sapi}-runtime.json"
     if [[ "$sapi" == apache || "$sapi" == frankenphp* ]]; then

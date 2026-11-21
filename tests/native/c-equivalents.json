@@ -306,7 +306,7 @@
     }
   },
   "dependency_sha256": {
-    "Cargo.lock": "86f5d9347766b44630c31888d3e58b46c95933c4430dff9d8206853197a0468e",
+    "Cargo.lock": "35755e0e9c014eb40bbbcd92edcdf6476bd49e540e1c9c514230f390407ae220",
     "Cargo.toml": "a77373f3fe3a9effa09cce3625b6e23916fd4c3678ee31657e0c8214e77eedaf",
     "crates/php-profiler/Cargo.toml": "ce7e3aff7a61e041e96272375b5e1067015f5ef376a964bca6f2aedc48e56e70",
     "crates/php-profiler/build.rs": "00165c497fd772e9612c31e718d4f0823c09bdf609b1999301fce06b3068bee2",
@@ -323,7 +323,7 @@
     "crates/profiler-core/src/sampling.rs": "38f447e02e78151ded334c16804d12b85ddfa145fb5468e64a1adbe7b24e6a7b",
     "crates/profiler-core/src/serialization.rs": "cabe9fabdaf9ee2386d4222abe34c2387d8fae92a5e71ca65a3d2f2739336b8f",
     "crates/profiler-core/src/storage.rs": "6b404604930949fe9e0537670fef52e5ee8b69c76796c420aeb8e2e79526eee3",
-    "docs/mutation-equivalence.md": "45ab52d85b8e3197161ff1d29b3193670b219ee308d0b313ad82c43d35f55907",
+    "docs/mutation-equivalence.md": "0ec661d9be37900b0e736f10e1bc374ab55d4ff7600a5320ce8623f361d4eb9c",
     "scripts/c-mutation-tests.sh": "fcce09b847b50ba000f7eeafed3cb3ec7953c21a407a638b7304def38d779b1e",
     "scripts/link-native-faults.sh": "8884e92ebca1ebcda81700fb9eaa91d15bd8e9f50f74055b5b2f71905981efa2",
     "scripts/native-bailout-tests.php": "27dd5f5ffa62388d3c3c52740d2c9de013605da740c5a249b3e9d098c47e3bde",

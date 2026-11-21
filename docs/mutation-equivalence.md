@@ -623,3 +623,14 @@ mutants.
 mutation builds use clang, and no first-party source, compile command, fixture symbol, context
 or equivalent changed. Only the `Cargo.lock` and documentation dependency hashes renew. The NTS
 and ZTS C mutation runs must still classify the same equivalents and kill every other mutant.
+
+## 2026-11-21 ext-php-rs-build 0.2.1
+
+`ext-php-rs-build`, which the vendored `ext-php-rs` build script uses to map PHP's API version to
+cfg flags, moves from 0.2.0 to 0.2.1. Its only source change widens the PHP 8.6 match from the
+single alpha API number 20260924 to the range up to 20261112, the API of PHP 8.6.0, and adds a
+unit test for those bounds. The match arms for PHP 8.3 to 8.5 are unchanged, so the C mutation
+runs on PHP 8.3 get the same cfg flags and bindings. No first-party source, compile command,
+fixture symbol, context or equivalent changed. Only the `Cargo.lock` and documentation dependency
+hashes renew. The NTS and ZTS C mutation runs must still classify the same equivalents and kill
+every other mutant.

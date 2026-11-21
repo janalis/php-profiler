@@ -200,8 +200,8 @@ jobs:
             sapi: 'frankenphp-1.1.5'
           - php: '8.3'
             sapi: 'frankenphp-1.0.3'
-        # Neither php:8.6-zts nor a FrankenPHP build on PHP 8.6 is published yet; the integration
-        # job covers 8.6 ZTS through setup-php.
+        # The official 8.6 images build every SAPI with --enable-zts, so there is no php:8.6-zts
+        # tag and the 8.6 cli cell is the ZTS one. FrankenPHP has no build on PHP 8.6 yet.
         exclude:
           - php: '8.6'
             sapi: 'zts'
