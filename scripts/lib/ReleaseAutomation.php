@@ -107,6 +107,45 @@ final class ReleaseAutomation
         ]);
     }
 
+    /**
+     * Deletes the candidate pull request's quality runs that GitHub holds for approval. A pull
+     * request opened with the default token gets a run that never starts and later shows as a
+     * failure; the dispatched exact-SHA run already supplies the result. Best effort: a failed
+     * lookup or deletion never stops the release.
+     */
+    private function deleteHeldRuns(string $source): void
+    {
+        try {
+            $runs = $this->api("actions/runs?event=pull_request&head_sha={$source}&per_page=100");
+        } catch (ProcessFailedStatus|\JsonException) {
+            echo "Could not list held pull request runs\n";
+            return;
+        }
+        foreach ($runs['workflow_runs'] ?? [] as $run) {
+            if (
+                ($run['name'] ?? null) !== 'quality'
+                || ($run['event'] ?? null) !== 'pull_request'
+                || ($run['conclusion'] ?? null) !== 'action_required'
+                || ($run['head_sha'] ?? null) !== $source
+                || ($run['head_repository']['full_name'] ?? null) !== self::REPOSITORY
+                || ($run['actor']['login'] ?? null) !== 'github-actions[bot]'
+                || !is_int($run['id'] ?? null)
+            ) {
+                continue;
+            }
+            $status = $this->runner->run([
+                'gh',
+                'api',
+                '--method',
+                'DELETE',
+                'repos/' . self::REPOSITORY . "/actions/runs/{$run['id']}",
+            ]);
+            if ($status !== 0) {
+                echo "Could not delete held pull request run {$run['id']}\n";
+            }
+        }
+    }
+
     public function validateRun(array $run, string $source): string
     {
         if (!ReleaseChecks::exactQualityRun($run, $source, self::REPOSITORY)) {
@@ -340,6 +379,7 @@ final class ReleaseAutomation
             return;
         }
         $this->publishQualityStatus($source, $qualityRunId);
+        $this->deleteHeldRuns($source);
         $this->check([
             'gh',
             'pr',

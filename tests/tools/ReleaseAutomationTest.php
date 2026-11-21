@@ -26,6 +26,11 @@ final class ReleaseTransport implements ReleaseRunner
     public array $qualityReceipts = [];
     public array $calls = [];
     public array $sleeps = [];
+    /** @var list<array<string, mixed>> the pull request runs GitHub lists for the candidate */
+    public array $pullRequestRuns = [];
+    public bool $failRunList = false;
+    public array $failDeletes = [];
+    public array $deleted = [];
     public string $tree;
     public array $pr;
     public array $quality;
@@ -78,6 +83,14 @@ final class ReleaseTransport implements ReleaseRunner
             $command === ['gh', 'api', $repository . 'git/ref/heads/' . $this->branch] => $this->branchExists
                 ? json_encode(['object' => ['sha' => $this->source]])
                 : throw new LogicException('Deleted branch must not be queried during recovery'),
+            $command === [
+                'gh',
+                'api',
+                $repository . "actions/runs?event=pull_request&head_sha={$this->source}&per_page=100",
+            ]
+                => $this->failRunList
+                ? throw new ProcessFailedStatus($command, 1, '')
+                : json_encode(['workflow_runs' => $this->pullRequestRuns]),
             array_slice($command, 0, 3) === ['gh', 'pr', 'list'] => $command[array_search('--state', $command, true)
                 + 1] === 'all'
                     ? json_encode([$this->pr])
@@ -93,6 +106,19 @@ final class ReleaseTransport implements ReleaseRunner
         $repository = ReleaseAutomation::REPOSITORY;
         if ($command === ['git', 'fetch', 'origin', 'refs/pull/17/head']) {
             return 0;
+        }
+        if (
+            count($command) === 5
+            && array_slice($command, 0, 4) === ['gh', 'api', '--method', 'DELETE']
+            && preg_match(
+                '/\\Arepos\\/' . preg_quote($repository, '/') . '\\/actions\\/runs\\/(\\d+)\\z/D',
+                $command[4],
+                $m,
+            )
+        ) {
+            same(0, $this->merges, 'held runs are deleted before the merge');
+            $this->deleted[] = (int) $m[1];
+            return in_array((int) $m[1], $this->failDeletes, true) ? 1 : 0;
         }
         if (array_slice($command, 0, 4) === ['gh', 'api', '--method', 'POST']) {
             same([
@@ -210,7 +236,7 @@ return [
         automate($transport);
         same(1, $transport->merges);
         same([$transport->merged, $transport->merged], $transport->dispatches);
-        same(21, count($transport->calls));
+        same(22, count($transport->calls));
         same([$transport->source], $transport->statuses);
     },
     'actual main waits for overall quality completion before status or merge' => static function (): void {
@@ -395,5 +421,67 @@ return [
             '-f',
             'expected_sha=' . $source,
         ], end($transport->calls));
+    },
+    'held bot pull request runs are deleted before the merge and nothing else is' => static function (): void {
+        $transport = new ReleaseTransport();
+        $transport->failDispatch = false;
+        $held = [
+            'id' => 7,
+            'name' => 'quality',
+            'event' => 'pull_request',
+            'status' => 'completed',
+            'conclusion' => 'action_required',
+            'head_sha' => $transport->source,
+            'head_repository' => ['full_name' => ReleaseAutomation::REPOSITORY],
+            'actor' => ['login' => 'github-actions[bot]'],
+        ];
+        $transport->pullRequestRuns = [
+            $held,
+            [...$held, 'id' => 8, 'name' => 'runner-retry'],
+            [...$held, 'id' => 9, 'event' => 'push'],
+            [...$held, 'id' => 10, 'conclusion' => 'failure'],
+            [...$held, 'id' => 11, 'head_sha' => $transport->merged],
+            [...$held, 'id' => 12, 'head_repository' => ['full_name' => 'someone/fork']],
+            [...$held, 'id' => 13, 'actor' => ['login' => 'someone-else']],
+            [...$held, 'id' => 'x14'],
+            [...$held, 'id' => 15],
+        ];
+        automate($transport);
+        same([[7, 15], 1], [$transport->deleted, $transport->merges]);
+        same(
+            true,
+            callIndex($transport, static fn(array $call): bool => ($call[3] ?? null) === 'DELETE') > callIndex(
+                $transport,
+                static fn(array $call): bool => ($call[3] ?? null) === 'POST',
+            ),
+        );
+    },
+    'failing to list or delete held runs never stops the release' => static function (): void {
+        $transport = new ReleaseTransport();
+        $transport->failDispatch = false;
+        $transport->failRunList = true;
+        automate($transport);
+        same([[], 1, [$transport->merged]], [$transport->deleted, $transport->merges, $transport->dispatches]);
+
+        $transport = new ReleaseTransport();
+        $transport->failDispatch = false;
+        $held = [
+            'id' => 7,
+            'name' => 'quality',
+            'event' => 'pull_request',
+            'conclusion' => 'action_required',
+            'head_sha' => $transport->source,
+            'head_repository' => ['full_name' => ReleaseAutomation::REPOSITORY],
+            'actor' => ['login' => 'github-actions[bot]'],
+        ];
+        $transport->pullRequestRuns = [$held, [...$held, 'id' => 8]];
+        $transport->failDeletes = [7];
+        automate($transport);
+        same([[7, 8], 1, [$transport->merged]], [$transport->deleted, $transport->merges, $transport->dispatches]);
+    },
+    'an already merged candidate deletes nothing' => static function (): void {
+        $transport = mergedTransport();
+        automate($transport);
+        same([[], 0], [$transport->deleted, $transport->merges]);
     },
 ];
