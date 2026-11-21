@@ -362,6 +362,9 @@ jobs:
       - run: scripts/php-tool.sh scripts/engine-metadata-tests.php
         env:
           PROFILER_EXTENSION: target/debug/libphp_profiler.dylib
+      # Sampling is Linux glibc only: on macOS this checks the unsupported stub and its oracle.
+      # The megamorphic JIT check stays on Linux: this macOS ZTS PHP has no tracing JIT.
+      - run: scripts/php-tool.sh scripts/sampling-controller-tests.php
 
   vendored-ownership-mutation:
     needs: source-pin
