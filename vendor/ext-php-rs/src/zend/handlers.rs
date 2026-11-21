@@ -172,26 +172,26 @@ impl ZendObjectHandlers {
 
         match cloned_val {
             Ok(Some(val)) => {
-                let mut new = ZendClassObject::<T>::new(val);
+                // A PHP subclass of `T` clones as itself, with its own property table.
+                let ce = unsafe { (*object).ce.as_ref() };
+                let mut new = unsafe { ZendClassObject::<T>::internal_new(Some(val), ce) };
                 unsafe { zend_objects_clone_members(&raw mut new.std, object) };
                 let raw = new.into_raw();
                 // SAFETY: `into_raw` yields a valid object the engine takes over.
                 unsafe { &raw mut (*raw).std }
             }
             Ok(None) => {
-                // Borrow the registered class name rather than owning a Rust
-                // message across Zend's potentially bailing-out error allocation.
-                // SAFETY: this handler runs only for registered T objects. The
-                // metadata's class entry and its NUL-terminated Zend name remain
-                // alive throughout the callback, including the error allocation.
-                let name = unsafe { (*T::get_metadata().ce().name).val.as_ptr() };
+                // Like `ZEND_CLONE`, name the object's own class, which for a PHP
+                // subclass of `T` is the subclass. The name goes to `%s` as is: an
+                // anonymous class name contains a NUL byte, so it can't be a CString.
+                let name = unsafe { (*object).get_class_entry().name };
                 unsafe {
                     zend_throw_error(
                         ptr::null_mut(),
                         c"Trying to clone an uncloneable object of class %s".as_ptr(),
-                        name,
-                    )
-                };
+                        (*name).val.as_ptr(),
+                    );
+                }
                 Self::released_placeholder::<T>()
             }
             Err(panic) => {

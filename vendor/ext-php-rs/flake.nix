@@ -34,11 +34,20 @@
       php-zts-debug =
         (withDebug (pkgs.php.override { ztsSupport = true; })).buildEnv { embedSupport = true; };
       php-zts-debug-dev = php-zts-debug.unwrapped.dev;
-      php86 = pkgs.php86.buildEnv { embedSupport = true; };
+      php86Pkg = pkgs.php86.override {
+        version = "8.6.0RC7";
+        phpSrc = pkgs.fetchFromGitHub {
+          owner = "php";
+          repo = "php-src";
+          tag = "php-8.6.0RC7";
+          hash = "sha256-l7VpRDf242YJqkTVvOEoMNqMLYK4QNdJ7R9dqZlkiaU=";
+        };
+      };
+      php86 = php86Pkg.buildEnv { embedSupport = true; };
       php86-dev = php86.unwrapped.dev;
-      php86-zts = (pkgs.php86.override { ztsSupport = true; }).buildEnv { embedSupport = true; };
+      php86-zts = (php86Pkg.override { ztsSupport = true; }).buildEnv { embedSupport = true; };
       php86-zts-dev = php86-zts.unwrapped.dev;
-      php86-debug = (withDebug pkgs.php86).buildEnv { embedSupport = true; };
+      php86-debug = (withDebug php86Pkg).buildEnv { embedSupport = true; };
       php86-debug-dev = php86-debug.unwrapped.dev;
       withAsan = phpPkg: phpPkg.override {
         stdenv = pkgs.clangStdenv;
@@ -62,10 +71,10 @@
       # local dev and CI (nhedger/setup-mago) run the exact same version.
       mago = pkgs.stdenvNoCC.mkDerivation rec {
         pname = "mago";
-        version = "1.57.0";
+        version = "1.60.2";
         src = pkgs.fetchurl {
           url = "https://github.com/carthage-software/mago/releases/download/${version}/mago-${version}-x86_64-unknown-linux-musl.tar.gz";
-          hash = "sha256-65riwMATzaEYWCIfn5OfXmDcm+XGb2/5BYFvXbbw0zY=";
+          hash = "sha256-KgSkmmwQWvCr+taEH1oWUb6TZDC1nx2F0THGiy88ee4=";
         };
         installPhase = ''
           runHook preInstall

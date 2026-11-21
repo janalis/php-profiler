@@ -634,3 +634,18 @@ runs on PHP 8.3 get the same cfg flags and bindings. No first-party source, comp
 fixture symbol, context or equivalent changed. Only the `Cargo.lock` and documentation dependency
 hashes renew. The NTS and ZTS C mutation runs must still classify the same equivalents and kill
 every other mutant.
+
+## 2026-11-21 ext-php-rs 0.16.5
+
+The vendored `ext-php-rs` moves from 0.16.4 to 0.16.5, with `ext-php-rs-derive` 0.12.5 and
+`parking_lot` 0.13. The local exception patch carries over unchanged; upstream now fixes the
+clone handler the way the local patch did, so that file is upstream source again. The other
+upstream changes do not reach the profiler: it reads its options array with `get` and `len`,
+never with the iterator whose key handling changed; it declares no `#[\SensitiveParameter]`
+parameters, so the module startup skips the new marking; it uses no embed or eval helper; and
+`parking_lot` 0.13 only drops `const_rwlock` and `const_mutex` for the now-const constructors.
+`bridge.c` and `sampling.c` compile against the PHP headers, not ext-php-rs's wrapper. No
+first-party source, compile command, fixture symbol, context or equivalent changed. The
+`Cargo.lock`, `crates/php-profiler/Cargo.toml` and documentation dependency hashes renew. The
+NTS and ZTS C mutation runs must still classify the same equivalents and kill every other
+mutant.

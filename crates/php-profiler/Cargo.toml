@@ -10,7 +10,7 @@ build = "build.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-ext-php-rs = "=0.16.4"
+ext-php-rs = "=0.16.5"
 profiler-core = { path = "../profiler-core" }
 
 [build-dependencies]
