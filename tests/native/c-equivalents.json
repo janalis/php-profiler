@@ -306,8 +306,8 @@
     }
   },
   "dependency_sha256": {
-    "Cargo.lock": "fd73d362675987e9bf34bc92f6079cdf3a1af6bf47a5188c7b82feecb4acdf19",
-    "Cargo.toml": "a77373f3fe3a9effa09cce3625b6e23916fd4c3678ee31657e0c8214e77eedaf",
+    "Cargo.lock": "21d9cef3dc97d050c99dc9bc16a45d06405e53b98ce3fe27569d894678439ea1",
+    "Cargo.toml": "0501a0cbeaacabca32fac36a9e3c9d5d93b5cb4bd474fe3603812eff5baeb5c8",
     "crates/php-profiler/Cargo.toml": "e7c9dfb152bcdf04c94b595fa4ac9f8f0b64ad874327c0b1dae550e26f825e95",
     "crates/php-profiler/build.rs": "00165c497fd772e9612c31e718d4f0823c09bdf609b1999301fce06b3068bee2",
     "crates/php-profiler/src/automatic.rs": "38271a4176586417f5185d66722521a3aabac9620776257d7555c4b6b32758cf",

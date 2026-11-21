@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.16] - 2026-11-21
+
+### Commits
+
+- feat: support PHP 8.6 (#62)
+
 ### Added
 
 - PHP 8.6 support. The build accepts PHP 8.6.0's API version (20261112) through ext-php-rs-build 0.2.1, and CI tests 8.6 NTS and ZTS.
