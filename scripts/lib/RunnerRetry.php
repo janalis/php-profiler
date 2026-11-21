@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PhpProfiler\Tooling;
 
+use Closure;
+
 /**
  * Decides whether a failed quality run failed only because GitHub never assigned a runner to
  * some of its jobs, as happens when no hosted macOS runner is free. Those jobs are cancelled
@@ -38,23 +40,97 @@ final class RunnerRetry
         $unassigned = 0;
         foreach ($jobs as $job) {
             $conclusion = $job['conclusion'] ?? null;
-            if (
-                in_array($conclusion, ['success', 'skipped'], true)
-                || in_array($job['name'] ?? null, self::FOLLOWERS, true)
-            ) {
+            if (in_array($conclusion, ['success', 'skipped'], true)) {
                 continue;
             }
-            if (
-                $conclusion !== 'cancelled'
-                || (string) ($job['runner_name'] ?? '') !== ''
-                || ($job['steps'] ?? []) !== []
-                || ($job['run_attempt'] ?? null) !== $run['run_attempt']
-            ) {
-                // A job that ran and failed, or one still pending, is not a missing runner.
+            $neverRan =
+                $conclusion === 'cancelled'
+                && (string) ($job['runner_name'] ?? '') === ''
+                && ($job['steps'] ?? []) === []
+                && ($job['run_attempt'] ?? null) === $run['run_attempt'];
+            if ($neverRan) {
+                $unassigned++;
+            } elseif (!in_array($job['name'] ?? null, self::FOLLOWERS, true)) {
+                // A job that ran and failed, or one still pending, is not a missing runner. The
+                // followers fail because of the others, unless they themselves never ran.
                 return false;
             }
-            $unassigned++;
         }
         return $unassigned > 0;
+    }
+
+    /**
+     * Reruns run $runId while shouldRerun() holds, waiting for each new attempt to complete.
+     * Events caused by the default token start no workflow, so a rerun's completion may not
+     * reach this workflow or the release: this job waits for it, and continues the release
+     * itself when a main push run passes on a rerun, as release-continuation does for
+     * dispatched runs. Returns what happened.
+     *
+     * @param Closure(string): mixed $get GETs a repository API path
+     * @param Closure(string): ?string $branchHead the branch's current head, null when gone
+     * @param Closure(): void $rerun reruns the run's failed jobs
+     * @param Closure(): void $continueRelease dispatches the release for this run
+     * @param Closure(int): void $sleep waits that many seconds
+     */
+    public static function retry(
+        int $runId,
+        string $repository,
+        Closure $get,
+        Closure $branchHead,
+        Closure $rerun,
+        Closure $continueRelease,
+        Closure $sleep,
+        int $polls = 330,
+    ): string {
+        $reran = false;
+        while (true) {
+            $run = $get("actions/runs/{$runId}");
+            $attempt = is_array($run) ? $run['run_attempt'] ?? null : null;
+            if (!is_int($attempt)) {
+                return "quality run {$runId}: no attempt to inspect";
+            }
+            $jobs = $get("actions/runs/{$runId}/attempts/{$attempt}/jobs?per_page=100");
+            if (!is_array($jobs) || !is_array($jobs['jobs'] ?? null)) {
+                return "quality run {$runId} attempt {$attempt}: no jobs to inspect";
+            }
+            if (!self::shouldRerun(
+                $run,
+                $jobs['jobs'],
+                $repository,
+                $branchHead((string) ($run['head_branch'] ?? '')),
+            )) {
+                break;
+            }
+            $rerun();
+            $reran = true;
+            for ($poll = 0;; $poll++) {
+                if ($poll === $polls) {
+                    return "quality run {$runId}: attempt " . ($attempt + 1) . ' did not complete in time';
+                }
+                $sleep(60);
+                $next = $get("actions/runs/{$runId}");
+                if (
+                    is_array($next)
+                    && is_int($next['run_attempt'] ?? null)
+                    && $next['run_attempt'] > $attempt
+                    && ($next['status'] ?? null) === 'completed'
+                ) {
+                    break;
+                }
+            }
+        }
+        $outcome = "quality run {$runId} attempt {$attempt}: " . ($run['conclusion'] ?? 'unknown');
+        if (!$reran) {
+            return "quality run {$runId} attempt {$attempt}: no rerun";
+        }
+        if (
+            ($run['conclusion'] ?? null) === 'success'
+            && ($run['event'] ?? null) === 'push'
+            && ($run['head_branch'] ?? null) === 'main'
+        ) {
+            $continueRelease();
+            return $outcome . '; release continued';
+        }
+        return $outcome;
     }
 }
