@@ -13,7 +13,7 @@ only through PHP.
 
 ## Build and use
 
-Build with stable Rust, 64-bit PHP 8.3–8.5 development headers, `php-config`, a C compiler
+Build with stable Rust, 64-bit PHP 8.3–8.6 development headers, `php-config`, a C compiler
 and libclang available to bindgen:
 
 ```sh

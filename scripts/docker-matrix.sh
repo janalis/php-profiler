@@ -39,8 +39,13 @@ run_fpm_suite() {
   docker run --rm ${opcache_environment[@]+"${opcache_environment[@]}"} "$image" scripts/php-tool.sh scripts/fpm-closure-tests.php \
     --mode preload-jit --require-jit --workers 4 --expected-php "$version" --expected-zts nts | tee "$compatibility/${version}-${sapi}-closure-preload-jit-four-workers.json"
 }
-for version in ${PHP_VERSIONS:-8.3 8.4 8.5}; do
+for version in ${PHP_VERSIONS:-8.3 8.4 8.5 8.6}; do
   for sapi in ${PHP_SAPIS:-cli zts fpm apache frankenphp}; do
+    # Neither php:8.6-zts nor a FrankenPHP build on PHP 8.6 is published yet.
+    if [[ "$version" == 8.6 && ( "$sapi" == zts || "$sapi" == frankenphp* ) ]]; then
+      echo "skip ${version}-${sapi}: no upstream image" >&2
+      continue
+    fi
     image="${PROFILER_IMAGE_PREFIX:-local-php-profiler}:${version}-${sapi}"
     php_image="php:${version}-${sapi}-bookworm"
     # FrankenPHP's image builds PHP the official images' way, so extensions load as usual. A
