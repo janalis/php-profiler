@@ -146,6 +146,31 @@ final class ReleaseAutomation
         }
     }
 
+    /**
+     * Deletes the candidate branch while it still points at $source. Branches merged with the
+     * default token are not deleted automatically, and the pull request keeps the immutable head
+     * that recovery reads. Best effort: a failed lookup or deletion never stops the release.
+     */
+    private function deleteBranch(string $branch, string $source): void
+    {
+        $ref = 'repos/' . self::REPOSITORY . '/git/refs/heads/' . $branch;
+        try {
+            $matching = $this->api('git/matching-refs/heads/' . $branch);
+        } catch (ProcessFailedStatus|\JsonException) {
+            echo "Could not look up branch {$branch}\n";
+            return;
+        }
+        foreach ($matching as $existing) {
+            if (
+                ($existing['ref'] ?? null) === 'refs/heads/' . $branch
+                && ($existing['object']['sha'] ?? null) === $source
+                && $this->runner->run(['gh', 'api', '--method', 'DELETE', $ref]) !== 0
+            ) {
+                echo "Could not delete branch {$branch}\n";
+            }
+        }
+    }
+
     public function validateRun(array $run, string $source): string
     {
         if (!ReleaseChecks::exactQualityRun($run, $source, self::REPOSITORY)) {
@@ -309,7 +334,7 @@ final class ReleaseAutomation
     private function continueCandidate(string $branch, string $source, string $mainSha, int $qualityRunId): void
     {
         // A previous attempt may have merged successfully before dispatch failed. Pull
-        // request records survive automatic source-branch deletion.
+        // request records survive the branch's deletion after the merge.
         $prs = json_decode(
             $this->command(
                 'gh',
@@ -368,6 +393,7 @@ final class ReleaseAutomation
             ) {
                 throw new InvalidArgumentException('Recorded merge differs from the validated squash candidate');
             }
+            $this->deleteBranch($branch, $source);
             $this->dispatch('main', $mainSha);
             return;
         }
@@ -375,7 +401,24 @@ final class ReleaseAutomation
             throw new InvalidArgumentException('Candidate branch advanced after quality validation');
         }
         if ($parent !== $mainSha) {
+            // A newer main run prepares a candidate on the new base; this one can never merge.
             echo "Main advanced; this candidate is obsolete\n";
+            $this->deleteHeldRuns($source);
+            $closed = $this->runner->run([
+                'gh',
+                'pr',
+                'close',
+                (string) $pr['number'],
+                '--repo',
+                self::REPOSITORY,
+                '--comment',
+                'Main advanced before this candidate could merge; a candidate on the new main replaces it.',
+            ]);
+            if ($closed !== 0) {
+                echo "Could not close obsolete pull request {$pr['number']}\n";
+                return;
+            }
+            $this->deleteBranch($branch, $source);
             return;
         }
         $this->publishQualityStatus($source, $qualityRunId);
@@ -408,6 +451,7 @@ final class ReleaseAutomation
         if ($merged['state'] !== 'MERGED') {
             throw new InvalidArgumentException('Protected merge did not complete');
         }
+        $this->deleteBranch($branch, $source);
         $this->dispatch('main', $merged['mergeCommit']['oid']);
     }
 }

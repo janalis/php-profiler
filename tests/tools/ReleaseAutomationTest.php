@@ -31,6 +31,13 @@ final class ReleaseTransport implements ReleaseRunner
     public bool $failRunList = false;
     public array $failDeletes = [];
     public array $deleted = [];
+    /** Where the candidate branch points; a token merge leaves it in place. */
+    public ?string $branchHead = null;
+    public bool $failRefLookup = false;
+    public bool $failBranchDelete = false;
+    public int $branchDeletes = 0;
+    public bool $failClose = false;
+    public array $closes = [];
     public string $tree;
     public array $pr;
     public array $quality;
@@ -91,6 +98,19 @@ final class ReleaseTransport implements ReleaseRunner
                 => $this->failRunList
                 ? throw new ProcessFailedStatus($command, 1, '')
                 : json_encode(['workflow_runs' => $this->pullRequestRuns]),
+            $command === ['gh', 'api', $repository . 'git/matching-refs/heads/' . $this->branch] => $this->failRefLookup
+                ? throw new ProcessFailedStatus($command, 1, '')
+                : json_encode(
+                    $this->branchExists
+                        ? [
+                            ['ref' => 'refs/heads/' . $this->branch . '-other', 'object' => ['sha' => $this->source]],
+                            [
+                                'ref' => 'refs/heads/' . $this->branch,
+                                'object' => ['sha' => $this->branchHead ?? $this->source],
+                            ],
+                        ]
+                        : [],
+                ),
             array_slice($command, 0, 3) === ['gh', 'pr', 'list'] => $command[array_search('--state', $command, true)
                 + 1] === 'all'
                     ? json_encode([$this->pr])
@@ -106,6 +126,30 @@ final class ReleaseTransport implements ReleaseRunner
         $repository = ReleaseAutomation::REPOSITORY;
         if ($command === ['git', 'fetch', 'origin', 'refs/pull/17/head']) {
             return 0;
+        }
+        if ($command === ['gh', 'api', '--method', 'DELETE', "repos/{$repository}/git/refs/heads/{$this->branch}"]) {
+            same(true, $this->branchExists, 'only an existing branch is deleted');
+            $this->branchDeletes++;
+            if ($this->failBranchDelete) {
+                return 1;
+            }
+            $this->branchExists = false;
+            return 0;
+        }
+        if (array_slice($command, 0, 3) === ['gh', 'pr', 'close']) {
+            same([
+                'gh',
+                'pr',
+                'close',
+                '17',
+                '--repo',
+                $repository,
+                '--comment',
+                'Main advanced before this candidate could merge; a candidate on the new main replaces it.',
+            ], $command);
+            same(true, $this->branchExists, 'the branch outlives the close');
+            $this->closes[] = 17;
+            return $this->failClose ? 1 : 0;
         }
         if (
             count($command) === 5
@@ -145,7 +189,6 @@ final class ReleaseTransport implements ReleaseRunner
             $this->merges++;
             $this->main = $this->merged;
             $this->pr = [...$this->pr, 'state' => 'MERGED', 'mergeCommit' => ['oid' => $this->merged]];
-            $this->branchExists = false;
             return 0;
         }
         if (array_slice($command, 0, 3) === ['gh', 'workflow', 'run']) {
@@ -236,7 +279,7 @@ return [
         automate($transport);
         same(1, $transport->merges);
         same([$transport->merged, $transport->merged], $transport->dispatches);
-        same(22, count($transport->calls));
+        same(25, count($transport->calls));
         same([$transport->source], $transport->statuses);
     },
     'actual main waits for overall quality completion before status or merge' => static function (): void {
@@ -483,5 +526,95 @@ return [
         $transport = mergedTransport();
         automate($transport);
         same([[], 0], [$transport->deleted, $transport->merges]);
+    },
+    'the merged candidate branch is deleted between the merge and the main dispatch' => static function (): void {
+        $transport = new ReleaseTransport();
+        $transport->failDispatch = false;
+        automate($transport);
+        same([1, 1, false, [$transport->merged]], [
+            $transport->merges,
+            $transport->branchDeletes,
+            $transport->branchExists,
+            $transport->dispatches,
+        ]);
+        $merge = callIndex(
+            $transport,
+            static fn(array $call): bool => array_slice($call, 0, 3) === ['gh', 'pr', 'merge'],
+        );
+        $delete = callIndex($transport, static fn(array $call): bool => str_contains(
+            $call[4] ?? '',
+            '/git/refs/heads/',
+        ));
+        $dispatch = callIndex(
+            $transport,
+            static fn(array $call): bool => array_slice($call, 0, 3) === ['gh', 'workflow', 'run'],
+        );
+        same(true, $merge < $delete && $delete < $dispatch);
+    },
+    'a moved, missing or undeletable branch never stops the release' => static function (): void {
+        foreach (['moved', 'lookup', 'delete', 'missing'] as $case) {
+            $transport = new ReleaseTransport();
+            $transport->failDispatch = false;
+            $transport->branchHead = $case === 'moved' ? str_repeat('e', 40) : null;
+            $transport->failRefLookup = $case === 'lookup';
+            $transport->failBranchDelete = $case === 'delete';
+            if ($case === 'missing') {
+                $transport->pr = [
+                    ...$transport->pr,
+                    'state' => 'MERGED',
+                    'mergeCommit' => ['oid' => $transport->merged],
+                ];
+                $transport->main = $transport->merged;
+                $transport->branchExists = false;
+            }
+            automate($transport);
+            same(
+                [$case === 'delete' ? 1 : 0, [$transport->merged]],
+                [$transport->branchDeletes, $transport->dispatches],
+                $case,
+            );
+            same($case !== 'missing', $transport->branchExists, $case);
+        }
+    },
+    'recovery after a merge deletes a branch the first attempt left' => static function (): void {
+        $transport = mergedTransport();
+        $transport->branchExists = true;
+        automate($transport);
+        same([1, false, [$transport->merged], 0], [
+            $transport->branchDeletes,
+            $transport->branchExists,
+            $transport->dispatches,
+            $transport->merges,
+        ]);
+    },
+    'an obsolete candidate is closed with its held runs and branch, and nothing is published' =>
+        static function (): void {
+            $transport = new ReleaseTransport();
+            $transport->main = str_repeat('e', 40);
+            $transport->pullRequestRuns = [[
+                'id' => 7,
+                'name' => 'quality',
+                'event' => 'pull_request',
+                'conclusion' => 'action_required',
+                'head_sha' => $transport->source,
+                'head_repository' => ['full_name' => ReleaseAutomation::REPOSITORY],
+                'actor' => ['login' => 'github-actions[bot]'],
+            ]];
+            automate($transport);
+            same([[7], [17], 1, false], [
+                $transport->deleted,
+                $transport->closes,
+                $transport->branchDeletes,
+                $transport->branchExists,
+            ]);
+            same([[], 0, []], [$transport->statuses, $transport->merges, $transport->dispatches]);
+        },
+    'an obsolete candidate that cannot be closed keeps its branch' => static function (): void {
+        $transport = new ReleaseTransport();
+        $transport->main = str_repeat('e', 40);
+        $transport->failClose = true;
+        automate($transport);
+        same([[17], 0, true], [$transport->closes, $transport->branchDeletes, $transport->branchExists]);
+        same([[], 0, []], [$transport->statuses, $transport->merges, $transport->dispatches]);
     },
 ];
