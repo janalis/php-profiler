@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.19] - 2026-11-23
+
+### Commits
+
+- fix: fail request startup on a deferred bailout when observers are Off (#80)
+
 ### Fixed
 
 - With `php_profiler.observer=Off`, a fatal error (for example the memory limit) raised while the extension logged during request startup no longer lets the request run on: request startup now fails, as it does when observers are on.
