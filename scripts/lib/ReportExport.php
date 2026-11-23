@@ -357,8 +357,12 @@ final class ReportExport
         }
 
         $notes = ['Times include instrumentation overhead. ts is relative to timestamp_origin_ns.'];
-        $dropped = self::count($report['dropped_timeline_events'], 'report.dropped_timeline_events');
-        if ($dropped !== 0 && $dropped !== '0') {
+        $dropped = self::counter(
+            $report,
+            'dropped_timeline_events',
+            self::count($report['dropped_timeline_events'], 'report.dropped_timeline_events'),
+        );
+        if ($dropped !== '0') {
             $notes[] = "Timeline truncated: {$dropped} completed invocation records were dropped after the timeline capacity was reached.";
         }
         $notes = [...$notes, ...self::reportNotes($report)];
@@ -465,7 +469,10 @@ final class ReportExport
             $notes[] = 'sampling counters are marked invalid';
         }
         if (is_string($sampling['failure_reason'] ?? null)) {
-            $notes[] = 'sampling failed: ' . $sampling['failure_reason'];
+            // capacity and stopped end a capture normally; only the other reasons are failures.
+            $reason = $sampling['failure_reason'];
+            $notes[] =
+                (in_array($reason, ['capacity', 'stopped'], true) ? 'sampling ended: ' : 'sampling failed: ') . $reason;
         }
         return ['output' => $output, 'notes' => $notes];
     }
@@ -483,6 +490,12 @@ final class ReportExport
             $notes[] = 'The call graph is omitted: the report marks calls unavailable, and Callgrind calls= lines need counts.';
         }
         return $notes;
+    }
+
+    /** A counter the report marks unavailable is a saturated placeholder, never a measurement. */
+    private static function counter(array $report, string $key, int|string $value): string
+    {
+        return in_array($key, $report['unavailable_metrics'], true) ? 'unavailable (saturated)' : self::show($value);
     }
 
     /**
@@ -505,7 +518,7 @@ final class ReportExport
         foreach ($counters as $key => $text) {
             $value = $report[$key] ?? 0;
             if ($value !== 0 && $value !== '0') {
-                $notes[] = "{$key}: " . self::show($value) . " {$text}";
+                $notes[] = "{$key}: " . self::counter($report, $key, $value) . " {$text}";
             }
         }
         if ($report['unavailable_metrics'] !== []) {

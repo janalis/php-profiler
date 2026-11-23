@@ -382,6 +382,35 @@ return [
             $result['stderr'],
         );
     },
+    'saturated counters print as unavailable and a capacity stop is not a failure' => static function (): void {
+        $cap = '18446744073709551615';
+        $trace = runExport(exportReport([
+            'dropped_timeline_events' => $cap,
+            'dropped_calls' => $cap,
+            'unavailable_metrics' => ['dropped_timeline_events', 'dropped_calls'],
+        ]), ['--format', 'chrome-trace']);
+        same(0, $trace['status'], $trace['stderr']);
+        $other = json_decode($trace['stdout'], true, flags: JSON_THROW_ON_ERROR)['otherData'];
+        same('unavailable (saturated)', $other['dropped_timeline_events']);
+        same(false, str_contains($other['notes'], $cap));
+        same(true, str_contains($other['notes'], 'dropped_calls: unavailable (saturated) calls were dropped'));
+        foreach ([['capacity', 'ended'], ['thread_failure', 'failed']] as [$reason, $verb]) {
+            $collapsed = runExport(sampledReport(['failure_reason' => $reason]), ['--format', 'collapsed']);
+            same(0, $collapsed['status'], $collapsed['stderr']);
+            same(true, str_contains($collapsed['stderr'], "note: sampling {$verb}: {$reason}\n"), $collapsed['stderr']);
+        }
+    },
+    'a report near the 16 MiB accessor limit exports under php -n' => static function (): void {
+        $timeline = [];
+        for ($frame = 1; $frame <= 70_000; $frame++) {
+            $timeline[] = exportFrame($frame, null, 'work', 1_000_000 + ($frame * 100), 1_000_050 + ($frame * 100));
+        }
+        $json = json_encode(exportReport(['timeline' => $timeline]), JSON_THROW_ON_ERROR);
+        same(true, strlen($json) > (12 * 1024 * 1024), (string) strlen($json));
+        $result = runExport($json, ['--format', 'chrome-trace']);
+        same([0, ''], [$result['status'], $result['stderr']]);
+        same(70_000, substr_count($result['stdout'], '"ph":"X"'));
+    },
     'collapsed never synthesizes stacks from the call graph' => static function (): void {
         exportFailed(
             runExport(exportReport(), ['--format', 'collapsed']),
@@ -467,8 +496,10 @@ return [
             PHP;
         $run = Process::run([PHP_BINARY, '-n', '-d', "extension={$extension}", '-r', $code]);
         if ($run['status'] !== 0) {
-            // A stale or mismatched build cannot load; that is not this exporter's failure.
-            fwrite(STDERR, "ReportExportTest: skipped the real report, the extension did not run:\n{$run['stderr']}");
+            $output = $run['stdout'] . $run['stderr'];
+            // Only a build that cannot load (stale or for another PHP) is skipped; a crash fails.
+            same(true, str_contains($output, 'Unable to load dynamic library'), $output);
+            fwrite(STDERR, "ReportExportTest: skipped the real report, the extension did not load:\n{$output}");
             return;
         }
         $report = json_decode($run['stdout'], true, flags: JSON_THROW_ON_ERROR);

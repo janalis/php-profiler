@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 // Converts a JSON report into Callgrind, Chrome Trace Event JSON or folded stacks.
 // Runs on a plain PHP 8.3+ CLI with no extension: php -n scripts/export-report.php ...
+// A report holds up to 16 MiB of JSON and decodes to several times that, beyond the 128M
+// default memory_limit of php -n. A fatal error must never land in the exported output.
+ini_set('memory_limit', '-1');
+ini_set('display_errors', 'stderr');
 require_once __DIR__ . '/lib/Arguments.php';
 require_once __DIR__ . '/lib/ReportExport.php';
 
