@@ -151,6 +151,11 @@ pub struct SymbolBuffer {
     bytes: [u8; SYMBOL_BUFFER_BYTES],
     length: usize,
 }
+impl Default for SymbolBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl SymbolBuffer {
     pub fn new() -> Self {
         Self {
@@ -160,9 +165,16 @@ impl SymbolBuffer {
     }
     pub fn oversized() -> Self {
         let mut value = Self::new();
-        value.bytes[..1025].fill(b'x');
-        value.length = 1025;
+        value.set_oversized();
         value
+    }
+    /// Reuse the buffer without zeroing it: every reader slices `bytes[..length]`.
+    pub fn clear(&mut self) {
+        self.length = 0;
+    }
+    pub fn set_oversized(&mut self) {
+        self.bytes[..1025].fill(b'x');
+        self.length = 1025;
     }
     pub fn as_str(&self) -> &str {
         std::str::from_utf8(&self.bytes[..self.length])
@@ -350,6 +362,16 @@ mod tests {
         let mut filled = SymbolBuffer::new();
         filled.write_str(&full).unwrap();
         assert!(filled.write_str("x").is_err());
+        assert_eq!(filled.as_str(), full);
+        // A reused buffer exposes only the new contents and regains full capacity.
+        filled.clear();
+        assert_eq!(filled.as_str(), "");
+        filled.write_str("ab").unwrap();
+        assert_eq!(filled.as_str(), "ab");
+        filled.set_oversized();
+        assert_eq!(filled.as_str(), "x".repeat(1025));
+        filled.clear();
+        filled.write_str(&full).unwrap();
         assert_eq!(filled.as_str(), full);
         assert!(FixedPath::<3>::copy(b"four").is_none());
         assert!(FixedPath::<3>::copy(b"a\0").is_none());

@@ -1,9 +1,6 @@
 //! Append-only, fallibly admitted lookup indexes for stable capture records.
 use crate::{Budget, BudgetError, BudgetVec};
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-};
+use std::hash::{Hash, Hasher};
 
 const EMPTY: usize = usize::MAX;
 struct Slot {
@@ -13,10 +10,52 @@ struct Slot {
 pub(crate) struct Index {
     slots: BudgetVec<Slot>,
 }
-/// DefaultHasher owns only stack state; unlike RandomState it does not obtain a
-/// fresh random seed. Hashes are internal lookup hints, never profile identity.
+/// Unseeded multiply-rotate word hasher (the FxHash step) with a murmur3
+/// `fmix64` finish, so the low bits `Index` masks depend on every input bit.
+/// It replaces SipHash on the per-call lookup path. Hashes are internal lookup
+/// hints, never profile identity: `Index` always confirms with `equals`.
+#[derive(Default)]
+struct Fingerprint {
+    hash: u64,
+}
+impl Fingerprint {
+    const MULTIPLIER: u64 = 0x517c_c1b7_2722_0a95;
+    fn add(&mut self, word: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(Self::MULTIPLIER);
+    }
+}
+impl Hasher for Fingerprint {
+    fn write(&mut self, bytes: &[u8]) {
+        let (words, rest) = bytes.as_chunks::<8>();
+        for word in words {
+            self.add(u64::from_le_bytes(*word));
+        }
+        if !rest.is_empty() {
+            let mut word = [0; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            // The unused top byte records the tail length, so zero padding
+            // cannot make "a" and "a\0" share a word.
+            word[7] = rest.len() as u8;
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+    fn write_u8(&mut self, value: u8) {
+        self.add(u64::from(value));
+    }
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+    fn finish(&self) -> u64 {
+        let mut value = self.hash;
+        value ^= value >> 33;
+        value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        value ^= value >> 33;
+        value = value.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        value ^ (value >> 33)
+    }
+}
 pub(crate) fn fingerprint(value: &(impl Hash + ?Sized)) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = Fingerprint::default();
     value.hash(&mut hasher);
     hasher.finish()
 }
@@ -84,6 +123,36 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fingerprint_is_stable_length_aware_and_spreads_low_bits() {
+        // Golden values pin every mixing constant and step.
+        assert_eq!(
+            [
+                fingerprint(""),
+                fingerprint("a"),
+                fingerprint("a\0"),
+                fingerprint("App\\Kernel::handle"),
+                fingerprint(&(Some(3_usize), 7_usize)),
+                fingerprint(&(None::<usize>, 7_usize)),
+            ],
+            [
+                12_819_011_691_522_796_655,
+                5_523_637_999_396_069_330,
+                16_902_307_935_051_469_365,
+                11_092_571_681_597_269_604,
+                17_502_858_833_310_787_125,
+                2_180_297_486_836_056_586,
+            ]
+        );
+        // Index masks the low bits: 4096 names should land in about 4096 * (1 - 1/e)
+        // = 2589 of 4096 buckets when the finish mixes well.
+        let mut used = vec![false; 4096];
+        for i in 0..4096 {
+            used[fingerprint(&format!("fn_{i}")) as usize & 4095] = true;
+        }
+        let used = used.iter().filter(|&&slot| slot).count();
+        assert!((2450..=2730).contains(&used), "{used} buckets used");
+    }
     #[test]
     fn one_client_predicate_handles_empty_partial_colliding_and_full_tables() {
         let budget = Budget::new(4096);
