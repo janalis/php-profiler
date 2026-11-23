@@ -69,6 +69,25 @@ The shared 64 MiB requested-capacity quota also applies to large or concurrent
 sessions. JSON/PHP-array accessors are limited to 16 MiB encoded output; larger
 reports can be written atomically to the configured file.
 
+## Viewing reports
+
+Reports are JSON. `scripts/export-report.php` converts one for standard viewers; it
+needs only a PHP 8.3+ CLI, with no extension (`php -n` works):
+
+```sh
+php -n scripts/export-report.php report.json --format callgrind --output callgrind.out.php
+php -n scripts/export-report.php report.json --format chrome-trace --output trace.json
+php -n scripts/export-report.php report.json --format collapsed > stacks.folded
+```
+
+`callgrind` opens in KCachegrind or QCacheGrind, `chrome-trace` in
+[Perfetto](https://ui.perfetto.dev) or `chrome://tracing` and needs a report started with
+`['timeline' => true]`, and `collapsed` feeds `flamegraph.pl` or speedscope and needs a
+version 2 report with `['sampling' => true]`. Output goes to standard output without
+`--output`, which replaces its file whole, with mode 0600 like the reports
+themselves. Unavailable metrics are omitted, never shown as zero; see
+[viewing reports](docs/report-format.md#viewing-reports-in-other-tools) for the mapping.
+
 ## Measurements and limits
 
 Observed calls include user/internal functions, methods, recursion, closures,
