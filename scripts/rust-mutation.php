@@ -18,10 +18,10 @@ use PhpProfiler\Tooling\Process;
 use PhpProfiler\Tooling\ValidationInputs;
 
 $root = Paths::resolve(dirname(__DIR__));
-$usage = 'rust-mutation.php [--package <name>]... [--output <directory>] [--timeout <seconds>] [--jobs <count>] [--list-only]';
+$usage = 'rust-mutation.php [--package <name>]... [--output <directory>] [--timeout <seconds>] [--jobs <count>] [--shard <k/n>] [--list-only]';
 ['options' => $options, 'positionals' => $positionals] = Arguments::parse(
     $argv,
-    ['package', 'output', 'timeout', 'jobs'],
+    ['package', 'output', 'timeout', 'jobs', 'shard'],
     ['list-only'],
     $usage,
     ['package'],
@@ -39,6 +39,20 @@ $packages = array_values((array) ($options['package'] ?? []));
 $timeout = $integer('timeout', 120);
 $jobs = $integer('jobs', 2);
 $listOnly = isset($options['list-only']);
+// Round-robin shards balance slow mutants across CI runners; every shard still
+// verifies the full source registry before running its own share.
+$shard = null;
+if (isset($options['shard'])) {
+    if (
+        !preg_match('~\A(\d+)/(\d+)\z~', (string) $options['shard'], $parts)
+        || (int) $parts[2] < 1
+        || (int) $parts[1] >= (int) $parts[2]
+    ) {
+        Arguments::fail('--shard: expected k/n with 0 <= k < n', $usage);
+    }
+    $shard = (int) $parts[1] . '/' . (int) $parts[2];
+}
+$shardArguments = $shard === null ? [] : ['--shard', $shard, '--sharding', 'round-robin'];
 if ($positionals !== []) {
     Arguments::fail('unrecognized arguments: ' . implode(' ', $positionals), $usage);
 }
@@ -203,6 +217,18 @@ try {
         );
     }
     $manifest['generated'] = count($mutants);
+    $manifest['shard'] = $shard;
+    $manifest['shard_generated'] = count($mutants);
+    if ($shard !== null) {
+        // Ask cargo-mutants for this shard's own list rather than re-deriving its partition.
+        $sharded = Process::run([...$command, ...$shardArguments, '--list', '--json'], $environment);
+        file_put_contents("{$run}/discovery-shard.json", $sharded['stdout']);
+        file_put_contents("{$run}/discovery-shard.stderr", $sharded['stderr']);
+        if ($sharded['status'] !== 0) {
+            throw new RuntimeException('Cargo mutation shard discovery failed');
+        }
+        $manifest['shard_generated'] = count(json_decode($sharded['stdout'], true, flags: JSON_THROW_ON_ERROR));
+    }
     if ($listOnly) {
         $status = 0;
     } else {
@@ -220,6 +246,7 @@ try {
             (string) $jobs,
             '--output',
             $run,
+            ...$shardArguments,
         ];
         $manifest['test_command'] = $testing;
         // Inherit the descriptors themselves, so a redirected log keeps every line.
@@ -244,7 +271,7 @@ try {
         ];
         if (
             $unviable['infrastructure_or_unknown']
-            || $outcomes['total_mutants'] !== count($mutants)
+            || $outcomes['total_mutants'] !== $manifest['shard_generated']
             || $outcomes['missed']
             || $outcomes['timeout']
         ) {

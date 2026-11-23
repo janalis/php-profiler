@@ -8,8 +8,9 @@ See [validation](docs/validation.md) for source-qualified coverage, mutation,
 compatibility results and remaining release blockers.
 
 The extension has no collector, telemetry, runtime network dependency, dashboard
-or dependency on Blackfire/Xdebug. Profiling is disabled by default and starts
-only through PHP.
+or dependency on Blackfire/Xdebug. Profiling is disabled by default. It starts
+through the PHP API, or per request when the opt-in `php_profiler.mode` setting enables
+[automatic request capture](#automatic-request-capture).
 
 ## Build and use
 
@@ -124,67 +125,25 @@ See [contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md), and [release pro
 
 ## Automatic request capture
 
-Administrator-controlled PHP INI settings can start captures without application changes:
+Administrator-controlled PHP INI settings can start captures without application
+changes. `mode` defaults to `off`; `always` captures every request, including CLI;
+`trigger` captures only requests whose `X-Php-Profiler-Trigger` header matches the
+configured secret.
 
 ```ini
 php_profiler.mode=trigger
 php_profiler.trigger_secret=replace-with-a-private-random-token
 php_profiler.output_dir=/var/private/php-profiles
-php_profiler.timeline=0
-php_profiler.sampling=0
-php_profiler.max_events=512
 ```
-
-Create the absolute output directory in advance and grant the PHP worker write access.
-`mode` defaults to `off`; `trigger` requires `X-Php-Profiler-Trigger` matching the
-configured nonempty secret. `always` captures every request, including CLI.
-Settings cannot be changed with `ini_set()`. Sampling has the same platform limits
-as the PHP API. Event limits range from 1 through 8192.
 
 ```sh
 curl -H "X-Php-Profiler-Trigger: $PROFILER_TOKEN" -D - https://example.test/
 ```
 
-A successfully started HTTP capture queues `X-Php-Profiler-Id`. Its report is
-`php-profile-<id>.json` in the configured directory. This ID describes an attempted
-capture, not guaranteed persistence. CLI emits no header. Errors are logged and
-application execution continues. Reports are private; operators must arrange
-retention and cleanup. No report download endpoint is provided. Existing PHP API
-stop, disable and reset operations also apply to automatic sessions. An automatic
-capture occupies one of the 16 sessions a request may hold and takes the first
-session ID, so applications see one fewer slot for their own sessions.
-
-For FPM, place these settings in the PHP INI loaded by the pool, or use pool
-`php_admin_value[php_profiler.mode] = trigger` and corresponding
-`php_admin_value[...]` entries for the other settings, then reload FPM. Configure
-`timeline` and `sampling` with `0` or `1`; both default to `0`. An empty
-`output_dir` disables automatic capture with a logged configuration error when
-capture is requested. The secret is only needed in trigger mode and is compared
-byte for byte. An empty secret, one longer than 4096 bytes or one containing a
-comma or a NUL byte is a configuration error, logged whenever a request carries the
-trigger header.
-Keep its value out of public PHP configuration diagnostics;
-PHP code running in the same pool can read it with `ini_get()`. HTTP servers must forward the
-trigger header to PHP as `HTTP_X_PHP_PROFILER_TRIGGER`; php-fpm, `php-cgi`, Apache and LiteSpeed
-answer it through their SAPI, FrankenPHP 1.1+ through `frankenphp_request_headers()`, every other SAPI through `$_SERVER`. In FrankenPHP's worker
-mode, each request a worker serves through `frankenphp_handle_request()` is captured as its own request,
-with its own `X-Php-Profiler-Id` header and report: the extension calls the application's callback through
-its internal `PhpProfiler\Internal\frankenphp_request()` function, which appears in backtraces and runs only
-as that callback. In `always` mode, a worker's start, up to its first `frankenphp_handle_request()` call, writes
-one report too. Sessions still running when a worker request ends are completed with it, as at the end of any
-request; sessions started between requests are completed when the worker next calls
-`frankenphp_handle_request()`, before it waits, and automatic capture skips code between requests. Outside worker mode,
-where FrankenPHP refuses `frankenphp_handle_request()`, the call leaves the current request's capture running on
-FrankenPHP 1.13.4+; earlier versions cannot tell the extension whether a script is a worker, so there the refused
-call still ends the capture. A value inherited from the PHP
-process environment never triggers a capture. php-fpm, Apache, the built-in server, NGINX
-Unit, FrankenPHP 1.1+ and LiteSpeed (in server mode) read request headers only, so the process environment
-(or a FrankenPHP `env` setting) does not affect them while they serve requests; the CLI never reads a trigger, nor do these
-SAPIs outside a request (LiteSpeed's command-line mode, `php-fpm -i`). Every
-other SAPI may read the process environment as a header (`php-cgi` falls back to it for
-missing FastCGI parameters; phpdbg, embed, phpmicro and FrankenPHP before 1.1 expose it), so when the
-environment PHP starts with defines `HTTP_X_PHP_PROFILER_TRIGGER`, trigger mode ignores
-every request under these SAPIs and logs that once per process. On FrankenPHP before 1.1, an `env` setting for
-the trigger header answers for every request. A variable a host sets after PHP starts is not detected.
-Classic CGI, where the web server passes headers through the environment, is not supported. Combined/comma-separated
-trigger values are rejected.
+A started HTTP capture returns `X-Php-Profiler-Id`; its report is
+`php-profile-<id>.json` in the output directory. Use a long random secret and keep
+it out of public PHP configuration diagnostics: PHP code in the same pool can read
+it with `ini_get()`. The output directory must be absolute, created in advance and
+private. No report download endpoint is provided; operators must arrange retention
+and cleanup. See [automatic capture](docs/automatic-capture.md) for every setting,
+trigger matching rules, per-SAPI behaviour and FrankenPHP worker mode.
