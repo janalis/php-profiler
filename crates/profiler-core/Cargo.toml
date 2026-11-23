@@ -2,7 +2,7 @@
 name = "profiler-core"
 version.workspace = true
 publish = false
-edition = "2021"
+edition.workspace = true
 license = "MIT"
 
 [dependencies]

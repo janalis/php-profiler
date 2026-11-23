@@ -1,4 +1,4 @@
-use profiler_core::{Budget, BudgetError, BudgetVec, Engine, JsonError, DEFAULT_BUDGET_BYTES};
+use profiler_core::{Budget, BudgetError, BudgetVec, DEFAULT_BUDGET_BYTES, Engine, JsonError};
 
 #[test]
 fn sixteen_large_default_sessions_share_one_quota_with_output_overlap() {
@@ -21,9 +21,11 @@ fn sixteen_large_default_sessions_share_one_quota_with_output_overlap() {
         .iter_mut()
         .map(|engine| engine.try_finish(2, 2, 0).unwrap())
         .collect();
-    assert!(reports
-        .iter()
-        .all(|report| report.functions.len() == 512 && report.status == "complete"));
+    assert!(
+        reports
+            .iter()
+            .all(|report| report.functions.len() == 512 && report.status == "complete")
+    );
     assert!(budget.used() <= DEFAULT_BUDGET_BYTES);
     let blocker = BudgetVec::<u8>::try_with_capacity(budget.available(), &budget).unwrap();
     assert!(matches!(

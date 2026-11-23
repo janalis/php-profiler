@@ -328,10 +328,12 @@ mod tests {
             private_directory_in(&root.join("missing"), "failure", &AtomicU64::new(0))
         })
         .unwrap_err();
-        assert!(failure
-            .downcast_ref::<String>()
-            .unwrap()
-            .starts_with("cannot create private test directory: "));
+        assert!(
+            failure
+                .downcast_ref::<String>()
+                .unwrap()
+                .starts_with("cannot create private test directory: ")
+        );
         assert!(!root.join("missing").exists());
         fs::remove_dir_all(root).unwrap();
     }
