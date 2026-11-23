@@ -83,6 +83,10 @@ static void *allocate(size_t size) {
         inject("string");
     return _emalloc(size);
 }
+static void log_err(const char *message, int severity) {
+    inject("startup-log");
+    php_log_err_with_severity(message, severity);
+}
 #define INTERPOSE(replacement, original) {(const void *)(replacement), (const void *)(original)}
 __attribute__((used)) static struct {
     const void *replacement;
@@ -92,6 +96,7 @@ __attribute__((used)) static struct {
     INTERPOSE(allowed, php_check_open_basedir_ex),
     INTERPOSE(resolve, expand_filepath),
     INTERPOSE(allocate, _emalloc),
+    INTERPOSE(log_err, php_log_err_with_severity),
     INTERPOSE(registration, zend_observer_fcall_register),
     INTERPOSE(clock_read, clock_gettime),
     INTERPOSE(op_array_handle, zend_get_op_array_extension_handle)};
@@ -105,6 +110,11 @@ extern int __real_php_check_open_basedir_ex(const char *, bool);
 extern char *__real_expand_filepath(const char *, char *);
 extern void *ZEND_FASTCALL __real__emalloc(size_t);
 extern int __real_clock_gettime(clockid_t, struct timespec *);
+extern void __real_php_log_err_with_severity(const char *, int);
+void __wrap_php_log_err_with_severity(const char *message, int severity) {
+    inject("startup-log");
+    __real_php_log_err_with_severity(message, severity);
+}
 /* Optional private sampler provider router. It delegates ordinary clocks and
  * confines sampler FI to its instrumented monotonic getter domain. Keeping
  * this strong wrapper preserves the independent bailout control-window fault. */

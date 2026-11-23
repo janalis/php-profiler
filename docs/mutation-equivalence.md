@@ -722,3 +722,18 @@ equivalent: `tests/native/clock-fault.php` (every `cpu_*` and `wall_*` mode),
 `tests/native/clock-boundary.php` and `tests/native/unmeasured-cpu-clock.php` must kill every one
 of their mutants in the NTS and ZTS C mutation runs. The `bridge.c`, both `lib.rs`,
 `tests/support/adapter-contract.rs` and this document's hashes renew.
+
+## 2026-11-23 Request startup re-raises an Off bailout
+
+`profiler_request_startup()` is appended to `bridge.c` after every recorded coordinate and
+becomes the module's request startup. It calls the Rust `profiler_request_begin()`, which
+runs the former request startup and reports whether observers are registered. Without them no
+fcall end observer re-raises a bailout deferred during that Rust code, so the bridge raises it
+once Rust returned. It leaves `pending_bailout` set, as the next request's `begin_request()`
+clears it and nothing else reads it without observers, so no equivalent is added. The
+`startup-log` fault in `tests/native/bailout-fault.c`, wrapped through
+`php_log_err_with_severity` by `scripts/link-native-faults.sh`, makes that logging bail out;
+`scripts/native-bailout-tests.php` requires the request to end before its first call with
+observers On and before any PHP with them Off. The fault object's new
+`__wrap_php_log_err_with_severity` joins both contexts' fixture symbols; no compile command or
+equivalent changed, and only the source and dependency hashes otherwise renew.
