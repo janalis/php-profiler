@@ -8,8 +8,9 @@ See [validation](docs/validation.md) for source-qualified coverage, mutation,
 compatibility results and remaining release blockers.
 
 The extension has no collector, telemetry, runtime network dependency, dashboard
-or dependency on Blackfire/Xdebug. Profiling is disabled by default and starts
-only through PHP.
+or dependency on Blackfire/Xdebug. Profiling is disabled by default. It starts
+through the PHP API, or per request when the opt-in `php_profiler.mode` setting enables
+[automatic request capture](#automatic-request-capture).
 
 ## Build and use
 
