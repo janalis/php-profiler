@@ -1,15 +1,15 @@
 //! Zend-independent bounded instrumentation and local JSON reports.
 mod budget;
 mod index;
-use index::{fingerprint, Index};
+use index::{Index, fingerprint};
 mod sampling;
 mod serialization;
 pub use sampling::{
-    SampleObservation, SampleRecord, SamplingCounters, SamplingFinish, SamplingReport,
-    SamplingTermination, SAMPLE_STACK_LIMIT,
+    SAMPLE_STACK_LIMIT, SampleObservation, SampleRecord, SamplingCounters, SamplingFinish,
+    SamplingReport, SamplingTermination,
 };
 mod storage;
-pub use budget::{Budget, BudgetError, Reservation, DEFAULT_BUDGET_BYTES};
+pub use budget::{Budget, BudgetError, DEFAULT_BUDGET_BYTES, Reservation};
 pub use serialization::{JsonBuffer, JsonError};
 pub use storage::{BudgetMap, BudgetText, BudgetVec};
 
@@ -444,10 +444,10 @@ impl Engine {
         observation: SampleObservation,
         frames: impl IntoIterator<Item = S>,
     ) {
-        if self.finalized.is_none() {
-            if let Some(sampling) = &mut self.sampling {
-                sampling.record(observation, frames);
-            }
+        if self.finalized.is_none()
+            && let Some(sampling) = &mut self.sampling
+        {
+            sampling.record(observation, frames);
         }
     }
     /// A sampler transport failure never invalidates the instrumentation graph.
@@ -1068,10 +1068,18 @@ impl Engine {
             }
         }
         let mut limitations = BudgetVec::try_with_capacity(5, &self.budget)?;
-        for limitation in ["Memory deltas are heap observations, not allocation counts; boundary peak may miss transient allocations.",
+        for limitation in [
+            "Memory deltas are heap observations, not allocation counts; boundary peak may miss transient allocations.",
             "CPU includes instrumentation overhead; wall clock is monotonic elapsed time.",
-            if self.sampling.is_some() { "Wall-safepoint samples are biased by VM service and delayed by long internal calls; coalesced wakes do not create extra stacks or CPU estimates. Independent CPU sampling and exact allocation counts are unavailable. Generator callbacks count resume segments; operation categories measure overlapping enclosing client latency." } else { "Statistical sampling and exact allocation counts are unavailable. Generator observer callbacks count resume segments rather than logical generator lifetimes. Operation categories measure enclosing client-call active latency, not remote server time; nested category durations can overlap." }] {
-            limitations.push(limitation.into()).expect("three core limitations fit five reserved slots");
+            if self.sampling.is_some() {
+                "Wall-safepoint samples are biased by VM service and delayed by long internal calls; coalesced wakes do not create extra stacks or CPU estimates. Independent CPU sampling and exact allocation counts are unavailable. Generator callbacks count resume segments; operation categories measure overlapping enclosing client latency."
+            } else {
+                "Statistical sampling and exact allocation counts are unavailable. Generator observer callbacks count resume segments rather than logical generator lifetimes. Operation categories measure enclosing client-call active latency, not remote server time; nested category durations can overlap."
+            },
+        ] {
+            limitations
+                .push(limitation.into())
+                .expect("three core limitations fit five reserved slots");
         }
         let mut report = Report {
             schema_version: if self.sampling.is_some() { 2 } else { 1 },
@@ -1147,20 +1155,59 @@ fn classify(symbol: &str) -> Option<&'static str> {
 }
 fn provenance(budget: &Budget) -> Result<BudgetMap<BudgetText>, BudgetError> {
     let mut map = BudgetMap::try_with_capacity(32, budget)?;
-    for (a,b) in [
-        ("metric_overflows","measured:detected-metric-arithmetic-range-errors;unit=count;capped-only-if-counter-is-itself-unavailable"),
-        ("hotspots","derived:top-20-function-aggregates-ranked-by-exclusive-wall-descending-then-symbol-ascending;no-new-measurement"),
-        ("request_peak_bytes","measured:zend-memory-peak-counter-snapshot;unit=bytes;scope=current-PHP-request-heap-peak-window;application-resettable;not-session-peak"),
-        ("calls","measured:observer-entry-count;unit=count;scope=function-or-edge;generators-count-resume-segments"),
-        ("exceptions","measured:observer-exit-with-pending-zend-exception;unit=count;scope=function-or-edge"),
-        ("timeline.suspended_wall_ns","derived:elapsed-minus-active;unit=ns;scope=invocation-context"),
-        ("session.memory_delta_bytes","derived:stop-minus-start-heap-snapshots;unit=bytes;scope=zend-request-heap;not-allocation-volume"),
-        ("session.elapsed_wall_ns","measured:monotonic-stop-minus-start;unit=ns;scope=session-elapsed-including-suspension"),
-        ("session.thread_cpu_ns","measured:thread-cpu-stop-minus-start;unit=ns;scope=thread-during-session"),
-        ("inclusive_wall_ns", "measured:active-monotonic-time;unit=ns;scope=function-or-edge-active-context"),
-        ("exclusive_wall_ns", "derived:inclusive-minus-children;unit=ns;scope=function-or-edge-active-context"),
-        ("inclusive_cpu_ns", "measured:active-thread-cpu;unit=ns;scope=function-or-edge-active-context"),
-        ("exclusive_cpu_ns", "derived:inclusive-minus-children;unit=ns;scope=function-or-edge-active-context"),
+    for (a, b) in [
+        (
+            "metric_overflows",
+            "measured:detected-metric-arithmetic-range-errors;unit=count;capped-only-if-counter-is-itself-unavailable",
+        ),
+        (
+            "hotspots",
+            "derived:top-20-function-aggregates-ranked-by-exclusive-wall-descending-then-symbol-ascending;no-new-measurement",
+        ),
+        (
+            "request_peak_bytes",
+            "measured:zend-memory-peak-counter-snapshot;unit=bytes;scope=current-PHP-request-heap-peak-window;application-resettable;not-session-peak",
+        ),
+        (
+            "calls",
+            "measured:observer-entry-count;unit=count;scope=function-or-edge;generators-count-resume-segments",
+        ),
+        (
+            "exceptions",
+            "measured:observer-exit-with-pending-zend-exception;unit=count;scope=function-or-edge",
+        ),
+        (
+            "timeline.suspended_wall_ns",
+            "derived:elapsed-minus-active;unit=ns;scope=invocation-context",
+        ),
+        (
+            "session.memory_delta_bytes",
+            "derived:stop-minus-start-heap-snapshots;unit=bytes;scope=zend-request-heap;not-allocation-volume",
+        ),
+        (
+            "session.elapsed_wall_ns",
+            "measured:monotonic-stop-minus-start;unit=ns;scope=session-elapsed-including-suspension",
+        ),
+        (
+            "session.thread_cpu_ns",
+            "measured:thread-cpu-stop-minus-start;unit=ns;scope=thread-during-session",
+        ),
+        (
+            "inclusive_wall_ns",
+            "measured:active-monotonic-time;unit=ns;scope=function-or-edge-active-context",
+        ),
+        (
+            "exclusive_wall_ns",
+            "derived:inclusive-minus-children;unit=ns;scope=function-or-edge-active-context",
+        ),
+        (
+            "inclusive_cpu_ns",
+            "measured:active-thread-cpu;unit=ns;scope=function-or-edge-active-context",
+        ),
+        (
+            "exclusive_cpu_ns",
+            "derived:inclusive-minus-children;unit=ns;scope=function-or-edge-active-context",
+        ),
         (
             "memory_delta_bytes",
             "derived:active-segment-heap-differences;unit=bytes;scope=zend-request-heap-observations-during-function",
@@ -1169,8 +1216,10 @@ fn provenance(budget: &Budget) -> Result<BudgetMap<BudgetText>, BudgetError> {
             "observed_boundary_peak_bytes",
             "measured:maximum-observed-zend-heap-snapshot;unit=bytes;scope=absolute-request-heap-observed-during-session;not-session-peak",
         ),
-    ]
-    {map.insert(a.into(),b.into()).expect("static provenance fits reserved metric slots");}
+    ] {
+        map.insert(a.into(), b.into())
+            .expect("static provenance fits reserved metric slots");
+    }
     Ok(map)
 }
 fn capabilities(budget: &Budget, sampled: bool) -> Result<BudgetMap<bool>, BudgetError> {
@@ -1397,10 +1446,12 @@ mod tests {
             report.limitations.push("no further slot".into()),
             Err(BudgetError::Limit)
         );
-        assert!(report
-            .unavailable_metrics
-            .iter()
-            .all(|field| report.metric_provenance[field].starts_with("unavailable:")));
+        assert!(
+            report
+                .unavailable_metrics
+                .iter()
+                .all(|field| report.metric_provenance[field].starts_with("unavailable:"))
+        );
     }
     #[test]
     fn completed_child_is_aggregated_before_its_parent_finishes() {
@@ -1483,10 +1534,12 @@ mod tests {
         assert_eq!(report.hotspots.len(), 20);
         assert_eq!(report.hotspots[0].symbol, "f00");
         assert_eq!(report.hotspots[19].symbol, "f19");
-        assert!(report
-            .hotspots
-            .iter()
-            .all(|entry| entry.metrics.exclusive_wall_ns >= 6));
+        assert!(
+            report
+                .hotspots
+                .iter()
+                .all(|entry| entry.metrics.exclusive_wall_ns >= 6)
+        );
     }
     #[test]
     fn report_budget_exhaustion_preserves_finalized_capture_and_retry_boundary() {
@@ -1645,10 +1698,11 @@ mod tests {
         assert_eq!(r.functions["a"].inclusive_wall_ns, 0);
         assert_eq!(r.clock_regressions, 2);
         assert!(r.hotspots.is_empty());
-        assert!(r
-            .unavailable_metrics
-            .iter()
-            .any(|name| name == "session.elapsed_wall_ns"));
+        assert!(
+            r.unavailable_metrics
+                .iter()
+                .any(|name| name == "session.elapsed_wall_ns")
+        );
         assert!(r.metric_provenance["inclusive_wall_ns"].starts_with("unavailable:"));
         assert_eq!(r.status, "incomplete");
     }

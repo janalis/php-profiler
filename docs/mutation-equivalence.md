@@ -661,3 +661,14 @@ call, changed how it builds the symbol but passes the engines the same symbol te
 same failure exits, so no compile command, fixture symbol, context or equivalent changed. Only the source and documentation
 dependency hashes renew. The NTS and ZTS C mutation runs must still classify the same
 equivalents and kill every other mutant.
+
+## 2026-11-23 profiler-core edition 2024
+
+`profiler-core` now inherits the workspace's 2024 edition, as `php-profiler` already did.
+`cargo fix --edition` changed no code; its one drop-order note concerns an `io::Error` dropped
+before a temporary path's budget reservation, which nothing observes. The remaining changes are
+rustfmt's 2024 style (import order and assertion wrapping) and one let-chain clippy asked for in
+`Engine::record_sample`. The crate is never compiled into the C mutation fixtures' C code, so no
+compile command, fixture symbol, context or equivalent changed. Only the source and dependency
+hashes renew. The NTS and ZTS C mutation runs must still classify the same equivalents and kill
+every other mutant.

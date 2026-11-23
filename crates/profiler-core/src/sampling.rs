@@ -1,7 +1,8 @@
 //! Bounded wall-clock safepoint observations. Timer wakes are never CPU samples.
 use crate::{
-    index::{fingerprint, Index},
-    use_linear_lookup, Budget, BudgetError, BudgetMap, BudgetText, BudgetVec, InlineName,
+    Budget, BudgetError, BudgetMap, BudgetText, BudgetVec, InlineName,
+    index::{Index, fingerprint},
+    use_linear_lookup,
 };
 use serde::Serialize;
 use std::num::NonZeroU64;
@@ -786,10 +787,12 @@ mod tests {
                 panic!("caller frame rendering failure")
             }
         });
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-            || e.record_sample(observation(), frames)
-        ))
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || e.record_sample(observation(), frames)
+            ))
+            .is_err()
+        );
         e.record_sample(observation(), ["prefix"]);
         e.finish_sampling(finish());
         let s = e.finish(10, 0, 0).sampling.unwrap();

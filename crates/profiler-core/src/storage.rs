@@ -1,8 +1,8 @@
 //! Fallible requested-capacity ownership for report buffers and text.
 use crate::{Budget, BudgetError, Reservation};
 use serde::{
-    ser::{SerializeMap, SerializeSeq},
     Serialize, Serializer,
+    ser::{SerializeMap, SerializeSeq},
 };
 use std::{
     fmt,
