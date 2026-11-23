@@ -195,6 +195,8 @@ struct State {
     next_context: u64,
     generated_functions: GeneratedNames,
     generated_classes: GeneratedNames,
+    /// Reused per call: a fresh buffer would zero its 2 KiB array every time.
+    symbol: SymbolBuffer,
 }
 thread_local! { static FAILED: Cell<bool> = const {Cell::new(false)}; static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn budget_error(cause: BudgetError) -> PhpException {
@@ -1077,23 +1079,28 @@ pub unsafe extern "C" fn profiler_enter(
     ffi_guard(|| {
         // SAFETY: Zend owns these strings throughout this synchronous callback.
         STATE.with(|s| {
-            if let Ok(mut s) = s.try_borrow_mut() {
-                let symbol = if len
+            if let Ok(mut guard) = s.try_borrow_mut() {
+                // Borrow fields disjointly: the reused symbol buffer is read while
+                // the sessions are updated.
+                let s = &mut *guard;
+                s.symbol.clear();
+                if len
                     .saturating_add(scope_len)
                     .saturating_add(if scope_len > 0 { 2 } else { 0 })
                     > 1024
                 {
-                    SymbolBuffer::oversized()
+                    s.symbol.set_oversized();
                 } else {
                     // SAFETY: Zend keeps both borrowed name byte ranges valid for this callback.
                     let raw_name = unsafe { std::slice::from_raw_parts(name, len) };
-                    let mut symbol = SymbolBuffer::new();
+                    let symbol = &mut s.symbol;
+                    let generated_classes = &mut s.generated_classes;
+                    let generated_functions = &mut s.generated_functions;
                     let mut render = || -> Result<(), std::fmt::Error> {
                         if scope_len > 0 {
                             let raw_scope = unsafe { std::slice::from_raw_parts(scope, scope_len) };
                             if raw_scope.starts_with(b"class@anonymous") {
-                                let ordinal = s
-                                    .generated_classes
+                                let ordinal = generated_classes
                                     .identity(raw_scope, 0)
                                     .ok_or(std::fmt::Error)?;
                                 write!(symbol, "anonymous-class#{ordinal}")?;
@@ -1103,8 +1110,7 @@ pub unsafe extern "C" fn profiler_enter(
                             symbol.write_str("::")?;
                         }
                         if closure_identity != 0 || raw_name.starts_with(b"{closure") {
-                            let ordinal = s
-                                .generated_functions
+                            let ordinal = generated_functions
                                 .identity(raw_name, closure_identity)
                                 .ok_or(std::fmt::Error)?;
                             write!(symbol, "{{closure#{ordinal}}}")?;
@@ -1116,36 +1122,36 @@ pub unsafe extern "C" fn profiler_enter(
                     if render().is_err() {
                         FAILED.set(true);
                         s.enabled = false;
-                        update_active(&s);
+                        update_active(s);
                         return;
                     }
-                    symbol
-                };
+                }
                 if s.frames.len() >= 8192 {
                     FAILED.set(true);
                     s.enabled = false;
-                    update_active(&s);
+                    update_active(s);
                     return;
                 }
                 let Some(identity) = s.next_frame.checked_add(1) else {
                     FAILED.set(true);
                     s.enabled = false;
-                    update_active(&s);
+                    update_active(s);
                     return;
                 };
                 if !s.frames.insert(frame, identity) {
                     FAILED.set(true);
                     s.enabled = false;
-                    update_active(&s);
+                    update_active(s);
                     return;
                 }
                 s.next_frame = identity;
+                let symbol = s.symbol.as_str();
                 for session in &mut s.sessions {
                     if let Some(engine) = &mut session.engine {
                         if internal != 0 {
-                            engine.enter_internal(identity, symbol.as_str(), wall, cpu, memory);
+                            engine.enter_internal(identity, symbol, wall, cpu, memory);
                         } else {
-                            engine.enter(identity, symbol.as_str(), wall, cpu, memory);
+                            engine.enter(identity, symbol, wall, cpu, memory);
                         }
                     }
                 }
