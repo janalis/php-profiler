@@ -112,6 +112,50 @@ A named metric is invalid across all rows conservatively. Dependent wall-time
 hotspot rankings are empty when their ranking metric is unavailable; capped
 integer values are never presented as successfully measured values.
 
+## Viewing reports in other tools
+
+`php -n scripts/export-report.php <report.json> --format callgrind|chrome-trace|collapsed [--output <path>]`
+converts a JSON report of either version. It runs on a plain PHP 8.3+ CLI with no
+extension and writes to standard output, or to `--output` through a temporary file
+renamed into place, so a failed export never leaves partial output. A report that is
+not valid JSON, has another `schema_version` or lacks the keys a format reads fails
+with status 1 and a message; usage errors exit with status 2.
+
+- **`callgrind`** ([format](https://valgrind.org/docs/manual/cl-format.html), for
+  KCachegrind and QCacheGrind). Events are `wall_ns` and `cpu_ns`. Each `functions`
+  entry becomes an `fn=` block whose self cost is its `exclusive_wall_ns` and
+  `exclusive_cpu_ns`; each `edges` entry becomes a `cfn=`/`calls=` call whose count is
+  the edge's `calls` and whose cost is its `inclusive_wall_ns` and `inclusive_cpu_ns`.
+  The `{session}` caller is the session root. Reports carry no source locations, so
+  every function is in the pseudo file `[php]` at line 0. Names use Callgrind's
+  `(id)` compression. No `totals:` line is written: viewers sum the self costs, which
+  exclude uninstrumented session time.
+- **`chrome-trace`** (Trace Event JSON, for Perfetto and `chrome://tracing`). Each
+  `timeline` record is a complete (`"X"`) event: `ts` is `start_ns` minus the earliest
+  record start, `dur` is `end_ns - start_ns`, both in microseconds with nanosecond
+  decimals. `pid` is 1 and `tid` is the record's `context_id`, so each fiber context
+  has its own track. `args` keep the frame and parent IDs, `completed`, `outcome`,
+  `active_wall_ns`, `active_cpu_ns` and `suspended_wall_ns`. `otherData` holds the
+  report status, the timestamp origin, `dropped_timeline_events`, unavailable metrics
+  and truncation notes. A report without a timeline (`timeline_enabled` false) is
+  refused: start the session with `['timeline' => true]`.
+- **`collapsed`** (folded stacks `root;...;leaf count`, for `flamegraph.pl` and
+  speedscope). Each retained `sampling.samples` record contributes its one actual
+  stack once, root first; coalesced wakes do not multiply it. A stack cut by
+  `depth_truncated` or `stack_truncated` starts with a `[truncated]` frame standing
+  for its missing root side, and a sample without frames is `[no-frames]`. A `;` or
+  control character in a name becomes `?`. The format has no comments, so sampling
+  status, truncation and loss counters are printed as `note:` lines on standard
+  error. Version 1 reports are refused: caller/callee edges cannot reconstruct
+  true stacks, and no stacks are synthesized from them.
+
+Metrics named in `unavailable_metrics` are never exported as values: Callgrind drops
+the affected event (and the whole call graph when `calls` is unavailable), and the
+trace omits the affected `args`. Callgrind fails when both wall and CPU times are
+unavailable, and the trace fails when `timeline.start_ns` or `timeline.end_ns` is.
+Report status, dropped calls, unmatched exits, clock regressions and overflows are
+written as Callgrind `#` comments and trace `otherData` notes.
+
 ## Developer API metadata
 
 The report accessors return the value shapes documented in the PHP stub:

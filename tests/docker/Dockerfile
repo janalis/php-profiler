@@ -14,6 +14,7 @@ COPY schema ./schema
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo build --release -p php-profiler
 COPY .dockerignore ./
 COPY .github ./.github
+COPY php ./php
 COPY scripts ./scripts
 COPY tests ./tests
 ENV PROFILER_EXTENSION=/profiler/target/release/libphp_profiler.so CI_PROFILER_REQUIRE_SAMPLING=1
