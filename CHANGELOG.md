@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.17] - 2026-11-23
+
+### Commits
+
+- feat: add a report export script for callgrind, Chrome trace and folded stacks (#77)
+
 ### Added
 
 - `scripts/export-report.php` converts a JSON report to Callgrind (KCachegrind, QCacheGrind), Chrome Trace Event JSON from the timeline (Perfetto, `chrome://tracing`) or folded stacks from sampling (`flamegraph.pl`, speedscope). It runs on a plain PHP 8.3+ CLI with no extension, omits unavailable metrics instead of printing zeros and records truncation in the output.
