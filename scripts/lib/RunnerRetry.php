@@ -32,7 +32,8 @@ final class RunnerRetry
             || ($run['conclusion'] ?? null) !== 'failure'
             || ($run['head_repository']['full_name'] ?? null) !== $repository
             || ($run['run_attempt'] ?? self::MAX_ATTEMPTS) >= self::MAX_ATTEMPTS
-            // A newer commit's run shares the concurrency group, and a rerun would cancel it.
+            // A push or pull request rerun joins its ref's concurrency group and would cancel a newer
+            // commit's run there; dispatched runs have their own group but are held to the same rule.
             || ($run['head_sha'] ?? null) !== $branchHead
         ) {
             return false;

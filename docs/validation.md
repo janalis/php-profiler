@@ -353,6 +353,10 @@ syntax rejected the replacement. No unexplained infrastructure, loader or linker
 failure was accepted as an unviable mutant. The per-mutant audit is
 `target/rust-mutation-symbol-buffer-final/run-rtzvdd7s/unviable-audit.json`.
 
+CI splits the run into four round-robin shards (`--shard k/4`). Each shard repeats the
+full-registry discovery checks, then asks cargo-mutants for its own share and requires
+its outcome count to match that list, so the four jobs together test every candidate.
+
 `scripts/c-mutation.sh` generates Mull's include registry from all runtime C
 sources and requires every non-equivalent mutant killed. One exact initializer
 mutation has a [reviewed CAS equivalence proof](mutation-equivalence.md); its raw
