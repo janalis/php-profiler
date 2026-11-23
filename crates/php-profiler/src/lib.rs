@@ -13,7 +13,7 @@ mod storage;
 use std::fmt::Write as _;
 use std::{
     cell::{Cell, RefCell},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use storage::{
     FixedPath, GeneratedNames, INPUT_PATH_BYTES, Identities, OUTPUT_PATH_BYTES, SESSION_CAPACITY,
@@ -197,6 +197,21 @@ struct State {
     generated_classes: GeneratedNames,
     /// Reused per call: a fresh buffer would zero its 2 KiB array every time.
     symbol: SymbolBuffer,
+}
+/// Whether module startup registered the Zend observers; `php_profiler.observer=Off` skips
+/// them, and every capture entry point then refuses to start.
+static OBSERVERS: AtomicBool = AtomicBool::new(false);
+fn observers_registered() -> bool {
+    OBSERVERS.load(Ordering::Relaxed)
+}
+fn require_observers() -> PhpResult<()> {
+    if observers_registered() {
+        Ok(())
+    } else {
+        Err(config_error(
+            "Profiling is unavailable: php_profiler.observer was Off at PHP startup",
+        ))
+    }
 }
 thread_local! { static FAILED: Cell<bool> = const {Cell::new(false)}; static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn budget_error(cause: BudgetError) -> PhpException {
@@ -947,6 +962,7 @@ pub struct PhpProfiler;
 #[php_impl]
 impl PhpProfiler {
     pub fn start(path: Option<&str>, options: Option<&ZendHashTable>) -> PhpResult<SessionHandle> {
+        require_observers()?;
         let mut timeline = false;
         let mut sampled = false;
         let mut max_events = DEFAULT_CAPTURE_RECORDS;
@@ -994,8 +1010,10 @@ impl PhpProfiler {
     pub fn is_enabled() -> bool {
         STATE.with(|s| s.borrow().enabled)
     }
-    pub fn enable() {
-        Profiler::enable()
+    pub fn enable() -> PhpResult<()> {
+        require_observers()?;
+        Profiler::enable();
+        Ok(())
     }
     pub fn disable() -> PhpResult<()> {
         Profiler::disable()
@@ -1245,15 +1263,23 @@ unsafe extern "C" fn startup(module_type: i32, module_number: i32) -> i32 {
     if module_type != ext_php_rs::ffi::MODULE_PERSISTENT as i32 {
         return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
     }
-    if automatic::register(module_number) != 0 {
+    let Some(observers) = automatic::register(module_number) else {
         return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
-    }
+    };
+    // A module restarted in the same process must not keep an earlier startup's answer.
+    OBSERVERS.store(false, Ordering::Relaxed);
     // SAFETY: permanent module startup is the required registration phase.
     unsafe {
-        if profiler_register() != 0 {
-            return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
+        // Off skips the fcall observer, the closure-identity cache word it alone reads, and
+        // the fiber observers, which act only for a capture or tracked context: neither can
+        // exist when every capture entry point refuses to start.
+        if observers {
+            if profiler_register() != 0 {
+                return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
+            }
+            profiler_register_fibers();
+            OBSERVERS.store(true, Ordering::Relaxed);
         }
-        profiler_register_fibers();
         if sampling::profiler_sampling_register() == 0 {
             return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
         }

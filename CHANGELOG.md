@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+### Added
+
+- `php_profiler.observer` system INI setting (default `On`). `Off` registers no Zend fcall or fiber observer and no closure-identity cache slot, so a loaded but unused extension avoids the observer dispatch cost. `Profiler::start()` and `Profiler::enable()` then throw `PhpProfiler\ConfigurationException`; automatic capture (`php_profiler.mode=always|trigger`) captures nothing, and the first request that asks for it logs that once per process. The sampling interrupt hook stays registered but can never start.
+
 ## [0.1.0-alpha.17] - 2026-11-23
 
 ### Commits

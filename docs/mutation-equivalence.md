@@ -672,3 +672,23 @@ rustfmt's 2024 style (import order and assertion wrapping) and one let-chain cli
 compile command, fixture symbol, context or equivalent changed. Only the source and dependency
 hashes renew. The NTS and ZTS C mutation runs must still classify the same equivalents and kill
 every other mutant.
+
+## 2026-11-23 php_profiler.observer
+
+The system-level `php_profiler.observer` setting lets module startup skip the fcall and fiber
+observers, the closure-identity handle and the FrankenPHP worker wrapper. Its INI handler, value
+getter and startup log are appended to `bridge.c` after every recorded coordinate, and the
+adapter's startup only branches around the existing registration calls, so no compile command,
+fixture symbol, context or equivalent changed. Only the source and dependency hashes renew. The
+NTS and ZTS C mutation runs must still classify the same equivalents and kill every other
+mutant, including those of the appended handler, which `scripts/observer-tests.php` exercises
+with `0`, `Off`, `false`, `no`, `1` and `On`.
+The Linux fault object reports its boundary helpers as never attempted, rather than failed,
+when Off skips the fcall registration that registers them; `tests/native/bailout-fault.c`
+only renews its dependency hash.
+A separate `observer-ini-register` fault fails only that table's registration, after the capture
+settings registered, so startup's second registration failure is rejected on its own; the
+automatic transport and `scripts/native-bailout-tests.php` only renew their dependency hashes.
+After review, the Off notice moved from module startup to the first request whose mode asks for
+capture, once per process, and its appended C helper was renamed; recorded coordinates are
+unchanged and only the hashes renew.

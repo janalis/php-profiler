@@ -621,3 +621,32 @@ void profiler_worker_unregister(void) {
     profiler_handle_request_function = NULL;
     zend_unregister_functions(profiler_worker_functions, -1, NULL);
 }
+/* php_profiler.observer: whether module startup registers the Zend observers at all. It is
+ * registered apart from the automatic capture settings, and the adapter reads it once, at
+ * module startup: a later system-level change, such as an FPM pool's php_admin_value, can
+ * neither remove registered observers nor add missing ones. */
+static bool profiler_observer_value = true;
+static ZEND_INI_MH(profiler_observer_update) {
+    (void)entry;
+    (void)mh_arg1;
+    (void)mh_arg2;
+    (void)mh_arg3;
+    (void)stage;
+    profiler_observer_value = zend_ini_parse_bool(new_value);
+    return SUCCESS;
+}
+/* PHP_INI_ENTRY_EX supplies its own trailing comma; {0} is PHP_INI_END()'s terminator. */
+static const zend_ini_entry_def profiler_observer_entries[] = {
+    PHP_INI_ENTRY_EX("php_profiler.observer", "1", PHP_INI_SYSTEM, profiler_observer_update,
+                     zend_ini_boolean_displayer_cb){0}};
+/* Module shutdown's zend_unregister_ini_entries() removes it with the module's others. */
+int profiler_observer_config_register(int number) {
+    return zend_register_ini_entries(profiler_observer_entries, number);
+}
+int profiler_observer_setting(void) { return profiler_observer_value; }
+/* Logged once per process, at the first request that configures automatic capture while
+ * observers are Off. */
+void profiler_observer_off_log(void) {
+    profiler_log("php_profiler: php_profiler.observer is Off, so php_profiler.mode captures "
+                 "nothing in this process");
+}

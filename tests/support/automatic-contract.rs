@@ -35,7 +35,7 @@ pub fn probe() {
     // Zend routes temporary-module INI teardown there rather than the process table.
     let previous = unsafe { profiler_test_config_type(ext_php_rs::ffi::MODULE_TEMPORARY as i32) };
     unregister(number);
-    assert_eq!(register(number), 0);
+    assert_eq!(register(number), Some(true));
     unsafe {
         profiler_test_config_type(previous);
     }

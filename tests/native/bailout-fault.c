@@ -206,11 +206,17 @@ void profiler_test_boundary_unregister(void) {
     }
 }
 static zend_result boundary_registration_result = FAILURE;
-int profiler_test_boundary_registration_status(void) { return boundary_registration_result; }
+static bool boundary_registration_attempted;
+/* php_profiler.observer=Off never registers the fcall observer, so these helpers are never
+ * attempted; that is not a failed registration and must not fail the module's startup. */
+int profiler_test_boundary_registration_status(void) {
+    return boundary_registration_attempted ? boundary_registration_result : SUCCESS;
+}
 extern void __real_zend_observer_fcall_register(zend_observer_fcall_init);
 void __wrap_zend_observer_fcall_register(zend_observer_fcall_init init) {
     observed_init = init;
     /* Every real MINIT registration call overwrites this result. */
+    boundary_registration_attempted = true;
     boundary_registration_result =
         zend_register_functions(NULL, boundary_functions, NULL, MODULE_PERSISTENT);
     /* The native void API must still publish the real observer even when a

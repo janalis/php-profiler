@@ -32,6 +32,7 @@ Every setting is system-only (`PHP_INI_SYSTEM`). `ini_set()` cannot change it.
 | `php_profiler.timeline` | `0` | `0` or `1` | Record a timeline, as the PHP API option. |
 | `php_profiler.sampling` | `0` | `0` or `1` | Enable sampling, as the PHP API option. |
 | `php_profiler.max_events` | `512` | `1` through `8192` | Event limit, as the PHP API option. |
+| `php_profiler.observer` | `On` | `On` or `Off` | Read once at PHP startup. `Off` registers no observer, so no capture starts; the first request whose `mode` is not `off` logs this once per process. |
 
 PHP's INI parser passes unquoted `Off`, `false`, `no` and `none` as an empty value,
 so they also mean `off` for `mode` and `0` for the boolean settings. `On`, `true`

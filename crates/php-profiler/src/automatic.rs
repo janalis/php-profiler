@@ -1,8 +1,13 @@
 use super::*;
 use std::ffi::CString;
 thread_local! { static SESSION: Cell<Option<i64>> = const { Cell::new(None) }; }
+/// Whether this process already said that observers are Off while capture was configured.
+static OBSERVER_OFF_LOGGED: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" {
     fn profiler_config_register(number: i32) -> i32;
+    fn profiler_observer_config_register(number: i32) -> i32;
+    fn profiler_observer_setting() -> i32;
+    fn profiler_observer_off_log();
     fn profiler_config_unregister(number: i32);
     fn profiler_trigger_snapshot();
     fn profiler_worker_register();
@@ -16,11 +21,19 @@ unsafe extern "C" {
     )]
     fn profiler_auto_header(value: *const std::ffi::c_char) -> i32;
 }
-pub fn register(number: i32) -> i32 {
+/// Registers the module's INI settings and the FrankenPHP worker wrapper, and returns
+/// whether `php_profiler.observer` asks for the Zend observers, or `None` on failure.
+pub fn register(number: i32) -> Option<bool> {
     unsafe {
         profiler_trigger_snapshot();
-        profiler_worker_register();
-        profiler_config_register(number)
+        if profiler_config_register(number) != 0 || profiler_observer_config_register(number) != 0 {
+            return None;
+        }
+        let observers = profiler_observer_setting() != 0;
+        if observers {
+            profiler_worker_register();
+        }
+        Some(observers)
     }
 }
 pub fn unregister(number: i32) {
@@ -49,6 +62,16 @@ pub fn start() {
 }
 fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
     SESSION.set(None);
+    // Without observers there is nothing to capture. The mode is read per request, because an
+    // FPM pool or Apache vhost can set it after module startup; the reason is logged once.
+    if !observers_registered() {
+        if !matches!(setting("mode").as_slice(), b"off" | b"")
+            && !OBSERVER_OFF_LOGGED.swap(true, Ordering::Relaxed)
+        {
+            unsafe { profiler_observer_off_log() };
+        }
+        return;
+    }
     let result = (|| -> Result<(), ()> {
         match setting("mode").as_slice() {
             // Unquoted `Off`, `false`, `no` and `none` reach extensions as "".
