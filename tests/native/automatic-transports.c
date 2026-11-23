@@ -76,5 +76,13 @@ int automatic_test_register(const zend_ini_entry_def *entries, int number) {
                     sizeof("INJECTED_INI_REGISTER_FAILURE\n") - 1);
         return FAILURE;
     }
+    /* Fails only the separate php_profiler.observer table, after the capture settings
+     * registered, so startup's second registration failure is reached on its own. */
+    if (mode && !strcmp(mode, "observer-ini-register") && entries && entries[0].name &&
+        !strcmp(entries[0].name, "php_profiler.observer")) {
+        (void)write(2, "INJECTED_OBSERVER_INI_REGISTER_FAILURE\n",
+                    sizeof("INJECTED_OBSERVER_INI_REGISTER_FAILURE\n") - 1);
+        return FAILURE;
+    }
     return real_register(entries, number);
 }

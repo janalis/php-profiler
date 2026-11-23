@@ -1,6 +1,10 @@
 <?php
 
-/** Runtime controls are request-local. Reports contain no argument values. */
+/**
+ * Runtime controls are request-local. Reports contain no argument values.
+ * With the system INI setting php_profiler.observer=Off at PHP startup, start() and
+ * enable() throw ConfigurationException.
+ */
 namespace PhpProfiler;
 
 class StateException extends \Exception {}
@@ -11,7 +15,11 @@ class PersistenceException extends \Exception {}
 
 final class Profiler
 {
-    /** Options: timeline/sampling(bool, default false), max_events(int 1..8192, default 512). */
+    /**
+     * Options: timeline/sampling(bool, default false), max_events(int 1..8192, default 512).
+     *
+     * @throws ConfigurationException when php_profiler.observer was Off at PHP startup.
+     */
     public static function start(?string $path = null, ?array $options = null): Session {}
 
     public static function isEnabled(): bool {}
@@ -19,6 +27,7 @@ final class Profiler
     /** Platform capability; resource admission may still fail. */
     public static function isSamplingSupported(): bool {}
 
+    /** @throws ConfigurationException when php_profiler.observer was Off at PHP startup. */
     public static function enable(): void {}
 
     public static function disable(): void {}

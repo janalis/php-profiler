@@ -112,7 +112,10 @@ if ($units) {
         echo "{$mode}: cold native guard return/publication/rethrow contract passed\n";
     }
 }
-$startupModes = ['handle-api', ...($units ? ['handles-negative', 'handles-capacity', 'ini-register'] : [])];
+$startupModes = [
+    'handle-api',
+    ...($units ? ['handles-negative', 'handles-capacity', 'ini-register', 'observer-ini-register'] : []),
+];
 foreach ($startupModes as $mode) {
     $result = Process::run(
         [$php, '-n', '-d', 'extension=' . $extension, '-r', 'echo "AFTER_MODULE_STARTUP";'],
@@ -123,6 +126,7 @@ foreach ($startupModes as $mode) {
     $marker = match ($mode) {
         'handle-api' => 'INJECTED_HANDLE_API_FAILURE',
         'ini-register' => 'INJECTED_INI_REGISTER_FAILURE',
+        'observer-ini-register' => 'INJECTED_OBSERVER_INI_REGISTER_FAILURE',
         default => 'INJECTED_HANDLE_COUNT_FAILURE',
     };
     if (

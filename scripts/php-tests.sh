@@ -46,3 +46,4 @@ PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/metadata-tests.php
 
 "${php_command[@]}" -n -d "extension=$extension" tests/native/root-directory.php
 PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/automatic-tests.php
+PROFILER_EXTENSION="$extension" scripts/php-tool.sh scripts/observer-tests.php

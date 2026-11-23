@@ -128,6 +128,19 @@ minimum cost. It must not be loaded for real profiling. Complete raw samples,
 CPU/wall observations, source/binary hashes and disassembly checks are retained in
 `target/empty-observer-bound/review.json`.
 
+## Observer opt-out
+
+`php_profiler.observer=Off`, a system INI setting read once at module startup,
+removes that floor for processes that never profile: module startup then
+registers no fcall observer, no fiber observers and no closure-identity
+op-array extension slot, so Zend dispatches no call or fiber event to the
+extension. The sampling `zend_interrupt_function` hook stays registered, though
+no sampler can start, so VM interrupts still pass through it. Capture is then unavailable for the whole process: `Profiler::start()`
+and `Profiler::enable()` throw `ConfigurationException`, and automatic capture
+never starts. The setting has not been benchmarked; it changes registration,
+not the observed-call paths measured above, and its cost relative to an absent
+extension remains to be measured.
+
 ## Runtime activation API review
 
 PHP 8.3–8.5's public headers explicitly restrict fcall observer registration to
