@@ -108,7 +108,16 @@ including ZTS virtual working directories.
 `metric_overflows` counts detected arithmetic overflow events.
 `unavailable_metrics` names fields whose numeric values must not be interpreted
 as valid measurements, including unavailable clocks/heap accounting or overflow.
-A named metric is invalid across all rows conservatively. Dependent wall-time
+A named metric is invalid across all rows conservatively.
+A session started with the `cpu` option set to `false` (or automatic capture with
+`php_profiler.cpu=0`) reads no thread-CPU clock. Its `inclusive_cpu_ns`,
+`exclusive_cpu_ns`, `session.thread_cpu_ns` and `timeline.active_cpu_ns` are zero
+placeholders, named in `unavailable_metrics` with provenance
+`unavailable:thread-cpu-disabled-by-session-option;…`. This is a declared
+configuration, not a failure: it does not by itself make the report incomplete, and
+wall-time metrics and hotspots stay measured, even when an overlapping session's
+thread-CPU clock fails. A wall clock failure still makes such a report incomplete;
+its CPU fields keep the disabled provenance. The schemas are unchanged. Dependent wall-time
 hotspot rankings are empty when their ranking metric is unavailable; capped
 integer values are never presented as successfully measured values.
 

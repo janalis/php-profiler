@@ -25,5 +25,36 @@ if ($session->getReport()['status'] !== 'complete') {
     throw new RuntimeException('native observation check invalidated healthy measurements');
 }
 Profiler::resetAll();
+// Without a CPU-measuring session, destruction forwards the CPU placeholder, never a reading.
+$session = Profiler::start(null, ['cpu' => false]);
+if (!profiler_test_fiber_observation_arm(true)) {
+    throw new RuntimeException('cannot establish healthy independent clock bounds');
+}
+$fiber = new Fiber(static function (): int {
+    return 73;
+});
+$fiber->start();
+unset($fiber);
+if (!profiler_test_fiber_observation_valid()) {
+    throw new RuntimeException('an unmeasured Fiber destruction forwarded a CPU value, not the placeholder');
+}
+$session->stop();
+// Any CPU-measuring session restores genuine readings for every overlapping session.
+$unmeasured = Profiler::start(null, ['cpu' => false]);
+$measured = Profiler::start();
+if (!profiler_test_fiber_observation_arm()) {
+    throw new RuntimeException('cannot establish healthy independent clock bounds');
+}
+$fiber = new Fiber(static function (): int {
+    return 73;
+});
+$fiber->start();
+unset($fiber);
+if (!profiler_test_fiber_observation_valid()) {
+    throw new RuntimeException('a CPU-measuring session received a skipped CPU reading');
+}
+$measured->stop();
+$unmeasured->stop();
+Profiler::resetAll();
 Profiler::disable();
 echo "active Fiber destruction forwards independently bracketed clocks and exact Zend heap\n";

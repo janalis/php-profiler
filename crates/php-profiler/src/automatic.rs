@@ -110,6 +110,7 @@ fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
         };
         let timeline = boolean("timeline")?;
         let sampling = boolean("sampling")?;
+        let cpu = boolean("cpu")?;
         let events: usize = std::str::from_utf8(&setting("max_events"))
             .map_err(|_| ())?
             .parse()
@@ -127,7 +128,7 @@ fn start_with_entropy(entropy: fn(&mut [u8; 16]) -> bool) {
         validated_path(Some(path)).map_err(|_| ())?;
         check_output_access(directory).map_err(|_| ())?;
         let session =
-            Profiler::start_config(Some(path), timeline, events, sampling).map_err(|_| ())?;
+            Profiler::start_options(Some(path), timeline, events, sampling, cpu).map_err(|_| ())?;
         SESSION.set(Some(session));
         let header = CString::new(format!("X-Php-Profiler-Id: {id}")).map_err(|_| ())?;
         if unsafe { profiler_auto_header(header.as_ptr()) } == 0 {

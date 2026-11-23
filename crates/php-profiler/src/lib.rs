@@ -31,6 +31,7 @@ unsafe extern "C" {
     fn profiler_register() -> i32;
     fn profiler_set_active(active: i32);
     fn profiler_set_context_tracking(tracking: i32);
+    fn profiler_set_thread_cpu(measured: i32);
     fn profiler_reset_clocks();
     fn profiler_register_fibers();
     fn profiler_context() -> u64;
@@ -62,13 +63,16 @@ unsafe extern "C" {
     fn profiler_ini(name: *const u8, length: usize, value_length: *mut usize) -> *const u8;
     fn profiler_wall() -> u64;
     fn profiler_cpu() -> u64;
+    fn profiler_boundary_cpu() -> u64;
     fn profiler_memory() -> u64;
     fn profiler_request_peak() -> u64;
     fn profiler_has_zend_mm() -> i32;
 }
+/// A boundary shared by recording sessions. It reads the thread-CPU clock only
+/// while one of them measures CPU; the others ignore the zero placeholder.
 fn snapshot() -> (u64, u64, u64) {
     // SAFETY: these read OS clocks and current-thread Zend counters without allocation.
-    unsafe { (profiler_wall(), profiler_cpu(), profiler_memory()) }
+    unsafe { (profiler_wall(), profiler_boundary_cpu(), profiler_memory()) }
 }
 #[derive(Clone, Copy)]
 struct MetadataBytes {
@@ -116,6 +120,8 @@ struct StopFacts {
     boundary: (u64, u64, u64),
     observer_failed: bool,
     clock_failed: bool,
+    /// The thread-CPU clock failed; this invalidates only sessions that measure CPU.
+    cpu_clock_failed: bool,
     request_peak: Option<u64>,
     zts: bool,
     reason: &'static str,
@@ -162,6 +168,7 @@ impl StopFacts {
             boundary,
             observer_failed: FAILED.get(),
             clock_failed: unsafe { profiler_clock_failed() } != 0,
+            cpu_clock_failed: CPU_CLOCK_FAILED.get(),
             request_peak,
             zts: unsafe { profiler_is_zts() } != 0,
             reason,
@@ -213,7 +220,7 @@ fn require_observers() -> PhpResult<()> {
         ))
     }
 }
-thread_local! { static FAILED: Cell<bool> = const {Cell::new(false)}; static STATE: RefCell<State> = RefCell::new(State::default()); }
+thread_local! { static FAILED: Cell<bool> = const {Cell::new(false)}; static CPU_CLOCK_FAILED: Cell<bool> = const {Cell::new(false)}; static STATE: RefCell<State> = RefCell::new(State::default()); }
 fn budget_error(cause: BudgetError) -> PhpException {
     error(match cause {
         BudgetError::Limit => "Native profiler memory budget exhausted",
@@ -398,9 +405,23 @@ fn has_recording_session(state: &State) -> bool {
         .iter()
         .any(|session| session.engine.as_ref().is_some_and(Engine::is_recording))
 }
+/// Observer boundaries may skip the thread-CPU clock only while no recording
+/// session measures CPU; every other engine ignores the CPU placeholder.
+fn measures_thread_cpu(state: &State) -> bool {
+    state.sessions.iter().any(|session| {
+        session
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_recording() && engine.thread_cpu_enabled())
+    })
+}
 fn update_active(state: &State) {
-    // SAFETY: request-thread-local scalar gate used only by observer callbacks.
-    unsafe { profiler_set_active(i32::from(state.enabled && has_recording_session(state))) };
+    // SAFETY: request-thread-local scalar gates used only by observer callbacks. The
+    // CPU interest is published before capture can begin observing with it.
+    unsafe {
+        profiler_set_thread_cpu(i32::from(measures_thread_cpu(state)));
+        profiler_set_active(i32::from(state.enabled && has_recording_session(state)));
+    };
     update_context_tracking(state);
     sampling::synchronize(state);
 }
@@ -420,6 +441,7 @@ fn clean_capture_state(state: &mut State) {
         state.generated_functions.clear();
         state.generated_classes.clear();
         FAILED.set(false);
+        CPU_CLOCK_FAILED.set(false);
         sampling::reset_failure();
         if state.sampling.is_some() {
             sampling::reset_backend();
@@ -495,14 +517,15 @@ unsafe fn engine_identity(pointer: *const std::ffi::c_char) -> Option<MetadataBy
     let bytes = unsafe { std::slice::from_raw_parts(pointer.cast::<u8>(), length) };
     Some(MetadataBytes::copy(bytes))
 }
-fn decorate(report: &mut Report, facts: &StopFacts) -> Result<(), BudgetError> {
+fn decorate(report: &mut Report, facts: &StopFacts, thread_cpu: bool) -> Result<(), BudgetError> {
     let budget = report.budget();
     if let Some(peak) = facts.request_peak {
         report.request_peak_bytes = Some(peak);
     } else {
         report.mark_memory_unavailable();
     }
-    if facts.clock_failed {
+    // A session without CPU ignores CPU readings, so their failure is not its own.
+    if facts.clock_failed || (thread_cpu && facts.cpu_clock_failed) {
         report.mark_clock_failure();
     }
     for (index, name) in ["php_version", "sapi"].into_iter().enumerate() {
@@ -662,7 +685,7 @@ fn complete(session: &mut SessionRecord) -> PhpResult<()> {
             .expect("stop facts captured before sealing");
         let (wall, cpu, memory) = facts.boundary;
         let mut report = engine.try_finish(wall, cpu, memory).map_err(budget_error)?;
-        decorate(&mut report, facts).map_err(budget_error)?;
+        decorate(&mut report, facts, engine.thread_cpu_enabled()).map_err(budget_error)?;
         if let Some(tracker) = &session.sampling {
             tracker.decorate(&mut report).map_err(budget_error)?;
         }
@@ -767,6 +790,15 @@ impl Profiler {
         max_events: usize,
         sampled: bool,
     ) -> PhpResult<i64> {
+        Self::start_options(path, timeline, max_events, sampled, true)
+    }
+    fn start_options(
+        path: Option<&str>,
+        timeline: bool,
+        max_events: usize,
+        sampled: bool,
+        cpu: bool,
+    ) -> PhpResult<i64> {
         if sampled && !sampling::supported() {
             return Err(config_error(
                 "Wall safepoint sampling requires Linux glibc 2.32 or later",
@@ -786,7 +818,7 @@ impl Profiler {
             if sampled && s.sampling.is_none() {
                 s.sampling = Some(sampling::Adapter::try_new(&budget).map_err(budget_error)?);
             }
-            let mut engine = if sampled {
+            let engine = if sampled {
                 Engine::try_with_sampling(
                     max_events,
                     timeline,
@@ -797,6 +829,11 @@ impl Profiler {
                 Engine::try_with_timeline(max_events, timeline, budget)
             }
             .map_err(budget_error)?;
+            let mut engine = if cpu {
+                engine
+            } else {
+                engine.without_thread_cpu()
+            };
             // Complete fallible admission before creating an optional worker.
             let context = context_identity(&mut s, unsafe { profiler_context() })?;
             let native = if sampled {
@@ -804,15 +841,19 @@ impl Profiler {
             } else {
                 None
             };
-            let (wall, cpu, memory) = if let Some(native) = native {
-                // The producer-locked counter snapshot is also this sampled
-                // session's wall start: old pending ticks cannot acquire a new
-                // owner. CPU/heap remain separate genuine boundary observations.
-                (native.snapshot_ns, unsafe { profiler_cpu() }, unsafe {
-                    profiler_memory()
-                })
-            } else {
-                snapshot()
+            // The producer-locked counter snapshot is also a sampled session's
+            // wall start: old pending ticks cannot acquire a new owner. CPU/heap
+            // remain separate genuine boundary observations. The new session's CPU
+            // interest is not yet published to the native gate, so its start reads
+            // the CPU clock exactly when it measures CPU.
+            // SAFETY: these read OS clocks and current-thread Zend counters without allocation.
+            let (wall, cpu, memory) = unsafe {
+                let wall = native.map_or_else(|| profiler_wall(), |native| native.snapshot_ns);
+                (
+                    wall,
+                    if cpu { profiler_cpu() } else { 0 },
+                    profiler_memory(),
+                )
             };
             engine.start(wall, cpu, memory);
             engine.switch_context(context, wall, cpu, memory);
@@ -965,6 +1006,7 @@ impl PhpProfiler {
         require_observers()?;
         let mut timeline = false;
         let mut sampled = false;
+        let mut cpu = true;
         let mut max_events = DEFAULT_CAPTURE_RECORDS;
         let mut known = 0;
         if let Some(options) = options {
@@ -979,6 +1021,12 @@ impl PhpProfiler {
                 sampled = value
                     .bool()
                     .ok_or_else(|| config_error("sampling must be bool"))?;
+            }
+            if let Some(value) = options.get("cpu") {
+                known += 1;
+                cpu = value
+                    .bool()
+                    .ok_or_else(|| config_error("cpu must be bool"))?;
             }
             if let Some(value) = options.get("max_events") {
                 known += 1;
@@ -997,11 +1045,7 @@ impl PhpProfiler {
             }
         }
         Ok(SessionHandle {
-            id: if sampled {
-                Profiler::start_config(validated_path(path)?, timeline, max_events, true)?
-            } else {
-                Profiler::start(validated_path(path)?, timeline, max_events)?
-            },
+            id: Profiler::start_options(validated_path(path)?, timeline, max_events, sampled, cpu)?,
         })
     }
     pub fn is_sampling_supported() -> bool {
@@ -1078,6 +1122,11 @@ impl SessionHandle {
 #[unsafe(no_mangle)]
 pub extern "C" fn profiler_observer_failed() {
     FAILED.set(true);
+}
+/// The thread-CPU clock failed or returned an unrepresentable value.
+#[unsafe(no_mangle)]
+pub extern "C" fn profiler_cpu_clock_failure() {
+    CPU_CLOCK_FAILED.set(true);
 }
 #[unsafe(no_mangle)]
 /// # Safety
@@ -1309,6 +1358,7 @@ pub extern "C" fn profiler_worker_request_end() {
 }
 fn begin_request() {
     FAILED.set(false);
+    CPU_CLOCK_FAILED.set(false);
     unsafe {
         profiler_set_active(0);
         profiler_set_context_tracking(0);

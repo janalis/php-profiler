@@ -10,6 +10,7 @@ php_profiler.trigger_secret=replace-with-a-private-random-token
 php_profiler.output_dir=/var/private/php-profiles
 php_profiler.timeline=0
 php_profiler.sampling=0
+php_profiler.cpu=1
 php_profiler.max_events=512
 ```
 
@@ -31,6 +32,7 @@ Every setting is system-only (`PHP_INI_SYSTEM`). `ini_set()` cannot change it.
 | `php_profiler.output_dir` | empty | Existing absolute directory | Where reports are written. |
 | `php_profiler.timeline` | `0` | `0` or `1` | Record a timeline, as the PHP API option. |
 | `php_profiler.sampling` | `0` | `0` or `1` | Enable sampling, as the PHP API option. |
+| `php_profiler.cpu` | `1` | `0` or `1` | Read thread-CPU clocks, as the PHP API option. `0` marks CPU metrics unavailable. |
 | `php_profiler.max_events` | `512` | `1` through `8192` | Event limit, as the PHP API option. |
 | `php_profiler.observer` | `On` | `On` or `Off` | Read once at PHP startup. `Off` registers no observer, so no capture starts; the first request whose `mode` is not `off` logs this once per process. |
 
@@ -47,7 +49,7 @@ settings include:
 - an unknown `mode`;
 - an empty, relative, missing or non-UTF-8 `output_dir`, or one blocked by
   `open_basedir`;
-- a `timeline` or `sampling` value other than `0` or `1`;
+- a `timeline`, `sampling` or `cpu` value other than `0` or `1`;
 - a `max_events` value that is not a number from 1 through 8192;
 - `sampling=1` where sampling is unsupported. Sampling has the same platform limits
   as the PHP API: see [sampling](sampling.md).

@@ -30,6 +30,9 @@ for mode in cpu wall; do
   env "$injection=$fault_directory/clock-fault.$suffix" \
     php -n -d "extension=$extension" tests/native/late-output-clocks.php "$mode"
 done
+# Sessions with the cpu option off never read the (failing) CPU clock.
+env "$injection=$fault_directory/clock-fault.$suffix" \
+  php -n -d "extension=$extension" tests/native/unmeasured-cpu-clock.php
 # An interrupted capture still needs real final measurements during cleanup.
 php -n -d "extension=$extension" tests/native/fiber-failure-metrics.php
 # Zend MM may be intentionally disabled; report unavailable memory explicitly.

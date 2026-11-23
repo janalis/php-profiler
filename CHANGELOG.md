@@ -7,6 +7,7 @@ All notable changes are documented here using Semantic Versioning. See the READM
 ### Added
 
 - `php_profiler.observer` system INI setting (default `On`). `Off` registers no Zend fcall or fiber observer and no closure-identity cache slot, so a loaded but unused extension avoids the observer dispatch cost. `Profiler::start()` and `Profiler::enable()` then throw `PhpProfiler\ConfigurationException`; automatic capture (`php_profiler.mode=always|trigger`) captures nothing, and the first request that asks for it logs that once per process. The sampling interrupt hook stays registered but can never start.
+- A `cpu` session option (default `true`) and matching `php_profiler.cpu` INI setting. With `cpu => false`, a session reads no thread-CPU clock: observer boundaries skip both `CLOCK_THREAD_CPUTIME_ID` reads per call while no recording session measures CPU, and the report lists `inclusive_cpu_ns`, `exclusive_cpu_ns`, `session.thread_cpu_ns` and `timeline.active_cpu_ns` in `unavailable_metrics` instead of presenting zeros as measurements. Overlapping sessions that measure CPU keep genuine readings, and a thread-CPU clock failure invalidates only those sessions.
 
 ## [0.1.0-alpha.17] - 2026-11-23
 

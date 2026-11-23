@@ -111,6 +111,9 @@ typedef struct {
     bool armed;
     bool checked;
     bool valid;
+    /* No recording session measures CPU: the native gate must forward exactly the
+     * zero placeholder instead of a clock reading. */
+    bool cpu_placeholder;
     uint64_t wall_minimum;
     uint64_t cpu_minimum;
 } profiler_test_fiber_observation;
@@ -143,7 +146,9 @@ void profiler_test_counted_destroy(uint64_t pointer, uint64_t wall, uint64_t cpu
                             test_clock_observation(CLOCK_THREAD_CPUTIME_ID, &maximum_cpu);
         test_fiber_observation.valid =
             clocks_valid && wall >= test_fiber_observation.wall_minimum && wall <= maximum_wall &&
-            cpu >= test_fiber_observation.cpu_minimum && cpu <= maximum_cpu &&
+            (test_fiber_observation.cpu_placeholder
+                 ? cpu == 0
+                 : cpu >= test_fiber_observation.cpu_minimum && cpu <= maximum_cpu) &&
             memory == actual_memory && memory >= 1024 * 1024;
         test_fiber_observation.checked = true;
         test_fiber_observation.armed = false;
@@ -151,12 +156,17 @@ void profiler_test_counted_destroy(uint64_t pointer, uint64_t wall, uint64_t cpu
     PROFILER_TEST_REAL_DESTROY(pointer, wall, cpu, memory);
 }
 static ZEND_FUNCTION(profiler_test_fiber_observation_arm) {
-    ZEND_PARSE_PARAMETERS_NONE();
+    bool cpu_placeholder = false;
+    ZEND_PARSE_PARAMETERS_START(0, 1)
+    Z_PARAM_OPTIONAL
+    Z_PARAM_BOOL(cpu_placeholder)
+    ZEND_PARSE_PARAMETERS_END();
     test_fiber_observation = (profiler_test_fiber_observation){0};
     bool valid =
         test_clock_observation(CLOCK_MONOTONIC, &test_fiber_observation.wall_minimum) &&
         test_clock_observation(CLOCK_THREAD_CPUTIME_ID, &test_fiber_observation.cpu_minimum) &&
         test_fiber_observation.cpu_minimum > 42;
+    test_fiber_observation.cpu_placeholder = cpu_placeholder;
     test_fiber_observation.armed = valid;
     RETURN_BOOL(valid);
 }
@@ -393,6 +403,9 @@ ZEND_ARG_OBJ_INFO(0, closure, Closure, 0)
 ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_closure_storage, 0, 1, IS_ARRAY, 0)
 ZEND_ARG_OBJ_INFO(0, closure, Closure, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_observation_arm, 0, 0, _IS_BOOL, 0)
+ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, cpu_placeholder, _IS_BOOL, 0, "false")
 ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_named_cache, 0, 1, _IS_BOOL, 0)
 ZEND_ARG_TYPE_INFO(0, name, IS_STRING, 0)
@@ -1074,16 +1087,17 @@ static const zend_function_entry guard_functions[] = {
             arginfo_guard_contract) ZEND_FE(profiler_test_automatic_transports, arginfo_uid_bool)
         ZEND_FE(profiler_test_guard_contract,
                 arginfo_guard_contract) ZEND_FE(profiler_test_uid_allocator, arginfo_uid_bool)
-            ZEND_FE(profiler_test_uid_threads, arginfo_uid_bool) ZEND_FE(profiler_test_uid_cache,
-                                                                         arginfo_uid_closure)
-                ZEND_FE(profiler_test_named_cache, arginfo_named_cache)
-                    ZEND_FE(profiler_test_closure_storage, arginfo_closure_storage)
-                        ZEND_FE(profiler_test_exhaust_closure_ids, arginfo_guard_contract)
-                            ZEND_FE(profiler_test_uid_clock_failed, arginfo_uid_bool)
-                                ZEND_FE(profiler_test_fiber_callbacks, arginfo_fiber_callbacks)
-                                    ZEND_FE(profiler_test_fiber_observation_arm, arginfo_uid_bool)
-                                        ZEND_FE(profiler_test_fiber_observation_valid,
-                                                arginfo_uid_bool) ZEND_FE_END};
+            ZEND_FE(profiler_test_uid_threads, arginfo_uid_bool)
+                ZEND_FE(profiler_test_uid_cache, arginfo_uid_closure)
+                    ZEND_FE(profiler_test_named_cache, arginfo_named_cache)
+                        ZEND_FE(profiler_test_closure_storage, arginfo_closure_storage)
+                            ZEND_FE(profiler_test_exhaust_closure_ids, arginfo_guard_contract)
+                                ZEND_FE(profiler_test_uid_clock_failed, arginfo_uid_bool)
+                                    ZEND_FE(profiler_test_fiber_callbacks, arginfo_fiber_callbacks)
+                                        ZEND_FE(profiler_test_fiber_observation_arm,
+                                                arginfo_observation_arm)
+                                            ZEND_FE(profiler_test_fiber_observation_valid,
+                                                    arginfo_uid_bool) ZEND_FE_END};
 /* Only the current MINIT's own entries may be removed. No retained static
  * flag can accidentally identify registrations from a later engine cycle. */
 #ifdef __linux__

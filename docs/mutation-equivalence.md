@@ -692,3 +692,33 @@ automatic transport and `scripts/native-bailout-tests.php` only renew their depe
 After review, the Off notice moved from module startup to the first request whose mode asks for
 capture, once per process, and its appended C helper was renamed; recorded coordinates are
 unchanged and only the hashes renew.
+
+## 2026-11-23 Session `cpu` option
+
+`bridge.c` gains a `thread_cpu` thread flag, its setter and `profiler_observed_cpu()`, which
+skips the thread-CPU clock when no recording session measures CPU. The insertions move the
+nine recorded `bridge.c` equivalents down by 3 to 13 lines. Each recorded line's text is
+byte-identical at its new position, and its column, mutator and replacement are unchanged; only
+the line numbers, source and dependency hashes renew, mapped by exact unique line text. The new
+flag, setter and placeholder branch carry no recorded equivalent: the NTS and ZTS C mutation
+runs must kill every one of their mutants, and `tests/native/fiber-observations.php`,
+`tests/native/unmeasured-cpu-clock.php` and `tests/php/thread_cpu.php` exercise both values of
+the flag.
+
+2026-11-23 follow-up: CPU clock failures no longer set `clock_failed`. Both clocks now share
+one `clock_nanoseconds()` reader that takes a failure callback: the wall callback stores
+`clock_failed` exactly as before, and the CPU callback is the Rust
+`profiler_cpu_clock_failure()`, so a CPU failure invalidates only sessions that measure CPU.
+
+2026-11-23 rebase onto `php_profiler.observer`: that change only appended code below every
+recorded `bridge.c` coordinate, so each of the 23 recorded lines keeps its text at the same
+position. Only the source and dependency hashes renew.
+This moves the nine recorded `bridge.c` equivalents by -7 to +1 lines (93→94, 94→95, 158→151,
+192→185, 307→300, 53→54, 291→284, 45→46, 331→324). Each recorded line's text is byte-identical
+and unique at its new position, and its column, mutator and replacement are unchanged. The
+`clock_failed` reset proof still holds: its sole getter is unchanged and genuine wall failures
+still store true. The new reader, wall callback and CPU callback call carry no recorded
+equivalent: `tests/native/clock-fault.php` (every `cpu_*` and `wall_*` mode),
+`tests/native/clock-boundary.php` and `tests/native/unmeasured-cpu-clock.php` must kill every one
+of their mutants in the NTS and ZTS C mutation runs. The `bridge.c`, both `lib.rs`,
+`tests/support/adapter-contract.rs` and this document's hashes renew.
