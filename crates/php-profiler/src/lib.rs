@@ -34,6 +34,7 @@ unsafe extern "C" {
     fn profiler_set_thread_cpu(measured: i32);
     fn profiler_reset_clocks();
     fn profiler_register_fibers();
+    fn profiler_request_startup(module_type: i32, module_number: i32) -> i32;
     fn profiler_context() -> u64;
     fn profiler_json_decode(text: *const u8, len: usize, out: *mut Zval) -> i32;
     fn profiler_string(text: *const u8, len: usize, out: *mut Zval);
@@ -1335,9 +1336,13 @@ unsafe extern "C" fn startup(module_type: i32, module_number: i32) -> i32 {
     };
     0
 }
-unsafe extern "C" fn request_startup(_: i32, _: i32) -> i32 {
+/// Request startup's Rust half, called by the bridge's `profiler_request_startup()`.
+/// Returns whether module startup registered the observers: without them no fcall end
+/// observer re-raises a bailout deferred here, so the bridge raises it once this returns.
+#[unsafe(no_mangle)]
+pub extern "C" fn profiler_request_begin() -> i32 {
     begin_request();
-    0
+    observers_registered() as i32
 }
 unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
     end_request();
@@ -1362,6 +1367,7 @@ fn begin_request() {
     unsafe {
         profiler_set_active(0);
         profiler_set_context_tracking(0);
+        profiler_set_thread_cpu(0);
         profiler_reset_clocks();
         sampling::profiler_sampling_request_init();
     }
@@ -1416,6 +1422,6 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .class::<PhpProfiler>()
         .startup_function(startup)
         .shutdown_function(module_shutdown)
-        .request_startup_function(request_startup)
+        .request_startup_function(profiler_request_startup)
         .request_shutdown_function(request_shutdown)
 }

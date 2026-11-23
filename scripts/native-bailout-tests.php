@@ -162,6 +162,40 @@ if ($units) {
         'tests/native/closure-map-pointers.php',
     ], timeout: 30);
 }
+// A bailout while request startup logs is deferred past Rust. With observers, the first
+// fcall end re-raises it; with php_profiler.observer=Off none exists, so request startup
+// raises it after Rust returned, before any PHP runs.
+foreach (['1', '0'] as $observer) {
+    $result = Process::run(
+        [
+            $php,
+            '-n',
+            '-d',
+            'extension=' . $extension,
+            '-d',
+            "php_profiler.observer={$observer}",
+            '-d',
+            'php_profiler.mode=always',
+            '-d',
+            'php_profiler.output_dir=',
+            '-r',
+            'echo "BEFORE_CALL\n"; str_repeat("x", 2); echo "AFTER_CALL\n";',
+        ],
+        $faultEnvironment(['PROFILER_TEST_BAILOUT' => 'startup-log']),
+        timeout: 30,
+    );
+    $output = $checked($result, 'native bailout boundary');
+    $ran = str_contains($output, 'BEFORE_CALL');
+    if (
+        $result['status'] === 0
+        || !str_contains($output, 'INJECTED_NATIVE_BAILOUT')
+        || $ran !== ($observer === '1')
+        || str_contains($output, 'AFTER_CALL')
+    ) {
+        fail("observer={$observer}: startup log bailout lost: " . json_encode($result['status']) . ": {$output}");
+    }
+    echo "observer={$observer}: request startup log bailout ends the request\n";
+}
 foreach (['decode', 'string', 'allowed', 'resolve'] as $mode) {
     $outerReport = "{$reports}/{$mode}.json";
     $result = Process::run(

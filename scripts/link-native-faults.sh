@@ -14,6 +14,7 @@ if [[ -n "${PROFILER_COVERAGE_TOOLCHAIN:-}" ]]; then cargo_command+=("+$PROFILER
   -C link-arg=-Wl,--wrap=php_check_open_basedir_ex \
   -C link-arg=-Wl,--wrap=expand_filepath \
   -C link-arg=-Wl,--wrap=_emalloc \
+  -C link-arg=-Wl,--wrap=php_log_err_with_severity \
   -C link-arg=-Wl,--wrap=profiler_resolve_path \
   -C link-arg=-Wl,--wrap=zend_observer_fcall_register \
   -C link-arg=-Wl,--wrap=zend_get_op_array_extension_handle \
