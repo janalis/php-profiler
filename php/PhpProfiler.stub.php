@@ -16,7 +16,9 @@ class PersistenceException extends \Exception {}
 final class Profiler
 {
     /**
-     * Options: timeline/sampling(bool, default false), max_events(int 1..8192, default 512).
+     * Options: timeline/sampling(bool, default false), cpu(bool, default true),
+     * max_events(int 1..8192, default 512). cpu=false reads no thread-CPU clock and
+     * reports CPU metrics as unavailable.
      *
      * @throws ConfigurationException when php_profiler.observer was Off at PHP startup.
      */

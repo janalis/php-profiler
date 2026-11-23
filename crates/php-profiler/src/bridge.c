@@ -14,6 +14,7 @@ extern void profiler_enter(uint64_t frame, const char *name, size_t length, cons
                            size_t scope_length, uint64_t wall, uint64_t cpu, uint64_t memory,
                            int internal, uint64_t closure_identity);
 extern void profiler_observer_failed(void);
+extern void profiler_cpu_clock_failure(void);
 extern void profiler_exit(uint64_t frame, uint64_t wall, uint64_t cpu, uint64_t memory,
                           int exception);
 extern void profiler_fiber_destroy(uint64_t pointer, uint64_t wall, uint64_t cpu, uint64_t memory);
@@ -24,8 +25,11 @@ typedef struct {
     bool pending_bailout;
     bool clock_failed;
     bool context_tracking;
+    /* Whether any recording session measures thread CPU. Rust publishes it before
+     * capture_active, so false never hides a reading from such a session. */
+    bool thread_cpu;
 } profiler_thread_flags;
-ZEND_TLS profiler_thread_flags profiler_flags = {false, false, false, false};
+ZEND_TLS profiler_thread_flags profiler_flags = {false, false, false, false, false};
 /* Cache words are opaque request-runtime storage, never op-array/SHM fields. */
 _Static_assert(sizeof(void *) == sizeof(uint64_t), "profiler requires 64-bit PHP cache words");
 /* Monotonic process hint: capture/pending true transitions publish first. Never
@@ -82,6 +86,7 @@ void profiler_set_active(int active) {
 #endif
     profiler_flags.capture_active = active != 0;
 }
+void profiler_set_thread_cpu(int measured) { profiler_flags.thread_cpu = measured != 0; }
 void profiler_set_context_tracking(int tracking) {
     profiler_flags.context_tracking = tracking != 0;
 }
@@ -92,37 +97,37 @@ void profiler_reset_clocks(void) {
 const char *profiler_php_version(void) { return PHP_VERSION; }
 const char *profiler_sapi(void) { return sapi_module.name; }
 int profiler_clock_failed(void) { return profiler_flags.clock_failed; }
+/* Wall failures invalidate every session's timing; CPU failures are reported to
+ * Rust, which invalidates only the sessions that measure CPU. */
+static void profiler_wall_failure(void) { profiler_flags.clock_failed = true; }
 /* Reject malformed providers and uptime beyond the u64 nanosecond domain. */
-static uint64_t clock_nanoseconds(const struct timespec *time) {
-    if (time->tv_sec < 0 || time->tv_nsec < 0 || time->tv_nsec >= 1000000000L) {
-        profiler_flags.clock_failed = true;
+static uint64_t clock_nanoseconds(clockid_t id, void (*failure)(void)) {
+    struct timespec t;
+    if (clock_gettime(id, &t) || t.tv_sec < 0 || t.tv_nsec < 0 || t.tv_nsec >= 1000000000L) {
+        failure();
         return 0;
     }
-    uint64_t seconds = (uint64_t)time->tv_sec;
-    uint64_t nanoseconds = (uint64_t)time->tv_nsec;
+    uint64_t seconds = (uint64_t)t.tv_sec;
+    uint64_t nanoseconds = (uint64_t)t.tv_nsec;
     if (seconds > (UINT64_MAX - nanoseconds) / UINT64_C(1000000000)) {
-        profiler_flags.clock_failed = true;
+        failure();
         return 0;
     }
     return seconds * UINT64_C(1000000000) + nanoseconds;
 }
 /* Read-only engine access and OS clocks cannot trigger Zend bailout. */
-uint64_t profiler_wall(void) {
-    struct timespec t;
-    if (clock_gettime(CLOCK_MONOTONIC, &t)) {
-        profiler_flags.clock_failed = true;
-        return 0;
-    }
-    return clock_nanoseconds(&t);
-}
+uint64_t profiler_wall(void) { return clock_nanoseconds(CLOCK_MONOTONIC, profiler_wall_failure); }
 uint64_t profiler_cpu(void) {
-    struct timespec t;
-    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t)) {
-        profiler_flags.clock_failed = true;
-        return 0;
-    }
-    return clock_nanoseconds(&t);
+    return clock_nanoseconds(CLOCK_THREAD_CPUTIME_ID, profiler_cpu_clock_failure);
 }
+/* Observer boundaries skip the thread-CPU clock, a system call on Linux and a Mach
+ * call on macOS, when no recording session measures CPU. Engines of sessions that
+ * opted out ignore every CPU input, so the 0 placeholder is never a measurement. */
+static zend_always_inline uint64_t profiler_observed_cpu(void) {
+    return profiler_flags.thread_cpu ? profiler_cpu() : 0;
+}
+/* The session-stop snapshot follows the same interest. */
+uint64_t profiler_boundary_cpu(void) { return profiler_observed_cpu(); }
 uint64_t profiler_memory(void) { return zend_memory_usage(0); }
 uint64_t profiler_request_peak(void) { return zend_memory_peak_usage(0); }
 int profiler_has_zend_mm(void) { return is_zend_mm(); }
@@ -149,14 +154,14 @@ static zend_never_inline void profiler_begin_active(zend_execute_data *data) {
     }
     profiler_enter((uint64_t)(uintptr_t)data, name ? ZSTR_VAL(name) : "{main}",
                    name ? ZSTR_LEN(name) : 6, scope ? ZSTR_VAL(scope) : NULL,
-                   scope ? ZSTR_LEN(scope) : 0, profiler_wall(), profiler_cpu(), profiler_memory(),
-                   data->func->type == ZEND_INTERNAL_FUNCTION, identity);
+                   scope ? ZSTR_LEN(scope) : 0, profiler_wall(), profiler_observed_cpu(),
+                   profiler_memory(), data->func->type == ZEND_INTERNAL_FUNCTION, identity);
 }
 static zend_never_inline void profiler_end_active(zend_execute_data *data) {
     if (profiler_control(data))
         return;
-    profiler_exit((uint64_t)(uintptr_t)data, profiler_wall(), profiler_cpu(), profiler_memory(),
-                  EG(exception) != NULL);
+    profiler_exit((uint64_t)(uintptr_t)data, profiler_wall(), profiler_observed_cpu(),
+                  profiler_memory(), EG(exception) != NULL);
 }
 /* Keep disabled dispatch out of the register-heavy active instrumentation bodies. */
 #ifdef ZTS
@@ -215,14 +220,14 @@ int profiler_register(void) {
 static void profiler_switch(zend_fiber_context *from, zend_fiber_context *to) {
     (void)from;
     if (profiler_flags.capture_active)
-        profiler_fiber_switch((uint64_t)(uintptr_t)to, profiler_wall(), profiler_cpu(),
+        profiler_fiber_switch((uint64_t)(uintptr_t)to, profiler_wall(), profiler_observed_cpu(),
                               profiler_memory());
 }
 uint64_t profiler_context(void) { return (uint64_t)(uintptr_t)EG(current_fiber_context); }
 static void profiler_destroy(zend_fiber_context *context) {
     if (profiler_flags.capture_active) {
-        profiler_fiber_destroy((uint64_t)(uintptr_t)context, profiler_wall(), profiler_cpu(),
-                               profiler_memory());
+        profiler_fiber_destroy((uint64_t)(uintptr_t)context, profiler_wall(),
+                               profiler_observed_cpu(), profiler_memory());
     } else if (profiler_flags.context_tracking) {
         profiler_fiber_cleanup((uint64_t)(uintptr_t)context);
     }
@@ -308,6 +313,7 @@ PHP_INI_ENTRY("php_profiler.output_dir", "", PHP_INI_SYSTEM, NULL)
 PHP_INI_ENTRY("php_profiler.timeline", "0", PHP_INI_SYSTEM, NULL)
 PHP_INI_ENTRY("php_profiler.sampling", "0", PHP_INI_SYSTEM, NULL)
 PHP_INI_ENTRY("php_profiler.max_events", "512", PHP_INI_SYSTEM, NULL)
+PHP_INI_ENTRY("php_profiler.cpu", "1", PHP_INI_SYSTEM, NULL)
 PHP_INI_END()
 int profiler_config_register(int number) { return zend_register_ini_entries(ini_entries, number); }
 void profiler_config_unregister(int number) { zend_unregister_ini_entries(number); }

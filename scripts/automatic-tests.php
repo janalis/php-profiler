@@ -557,6 +557,7 @@ foreach ([
     ['max_events', '8193'],
     ['timeline', 'invalid'],
     ['sampling', 'invalid'],
+    ['cpu', 'invalid'],
     ['output_dir', 'relative'],
     ['output_dir', $directory . '/missing'],
 ] as [$name, $value]) {
@@ -600,6 +601,16 @@ runPhp([
 ], check: true);
 check((bool) report(reports($directory)[0])['timeline']);
 array_map(unlink(...), reports($directory));
+// php_profiler.cpu defaults to measuring CPU; 0 and Off mark CPU explicitly unavailable.
+$cpuFields = ['exclusive_cpu_ns', 'inclusive_cpu_ns', 'session.thread_cpu_ns', 'timeline.active_cpu_ns'];
+foreach ([[null, []], ['1', []], ['0', $cpuFields], ['Off', $cpuFields]] as [$cpu, $unavailable]) {
+    $setting = $cpu === null ? [] : ['-d', "php_profiler.cpu={$cpu}"];
+    runPhp([...$base, ...$setting, '-r', 'function a() {} a();'], check: true);
+    $found = reports($directory);
+    check(count($found) === 1, $cpu, $found);
+    check(report($found[0])['unavailable_metrics'] === $unavailable, $cpu, report($found[0]));
+    unlink($found[0]);
+}
 $result = runPhp([...$base, '-d', 'php_profiler.sampling=1', '-r', 'usleep(20000);'], check: true);
 $sampled = reports($directory);
 if (getenv('CI_PROFILER_REQUIRE_SAMPLING') === '1') {

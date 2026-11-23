@@ -123,6 +123,11 @@ impl Report {
             "unavailable:Zend-memory-manager-disabled;numeric-values-are-not-valid-measurements",
         );
     }
+    /// A session that opted out of thread-CPU measurement received no CPU
+    /// observations; its zero CPU values are placeholders, not measurements.
+    fn mark_thread_cpu_disabled(&mut self) {
+        self.mark_unavailable(CPU_FIELDS, THREAD_CPU_DISABLED);
+    }
     fn mark_unavailable(&mut self, fields: &[&'static str], reason: &'static str) {
         for field in fields {
             if !self
@@ -134,6 +139,15 @@ impl Report {
                     .push((*field).into())
                     .expect("reserved unavailable-metric slots");
             }
+            // CPU fields of a session without CPU were never measured, so a later
+            // clock failure must not present them as failed measurements.
+            if self
+                .metric_provenance
+                .get(field)
+                .is_some_and(|current| &**current == THREAD_CPU_DISABLED)
+            {
+                continue;
+            }
             self.metric_provenance
                 .insert((*field).into(), reason.into())
                 .expect("reserved provenance slots");
@@ -141,6 +155,14 @@ impl Report {
         self.unavailable_metrics.sort_unstable();
     }
 }
+const THREAD_CPU_DISABLED: &str =
+    "unavailable:thread-cpu-disabled-by-session-option;numeric-values-are-zero-placeholders";
+const CPU_FIELDS: &[&str] = &[
+    "inclusive_cpu_ns",
+    "exclusive_cpu_ns",
+    "session.thread_cpu_ns",
+    "timeline.active_cpu_ns",
+];
 const TIMING_FIELDS: &[&str] = &[
     "inclusive_wall_ns",
     "exclusive_wall_ns",
@@ -354,6 +376,8 @@ pub struct Engine {
     context_id: u64,
     contexts: BudgetVec<Context>,
     timeline_enabled: bool,
+    /// False when the session opted out of thread CPU: every CPU input is ignored.
+    cpu_enabled: bool,
     operations: [Metrics; 3],
     arithmetic: Arithmetic,
     budget: Budget,
@@ -409,6 +433,7 @@ impl Engine {
             context_id: 0,
             contexts,
             timeline_enabled,
+            cpu_enabled: true,
             operations: std::array::from_fn(|_| Metrics::default()),
             arithmetic: Arithmetic::default(),
             budget,
@@ -437,6 +462,22 @@ impl Engine {
             engine.budget.clone(),
         )?);
         Ok(engine)
+    }
+    /// Opt out of thread-CPU measurement before any observation. Every CPU input
+    /// is then ignored, so callers may pass a placeholder such as zero, and the
+    /// report marks CPU metrics unavailable instead of presenting zeros as measured.
+    pub fn without_thread_cpu(mut self) -> Self {
+        self.cpu_enabled = false;
+        self
+    }
+    /// Whether this capture measures thread CPU and needs genuine CPU observations.
+    pub fn thread_cpu_enabled(&self) -> bool {
+        self.cpu_enabled
+    }
+    /// A disabled CPU measurement replaces every input with one constant, so
+    /// placeholders can neither become durations nor look like clock regressions.
+    fn cpu(&self, cpu_ns: u64) -> u64 {
+        if self.cpu_enabled { cpu_ns } else { 0 }
     }
     /// Record one actual stack for a batch of timer wakes; input is leaf to root.
     pub fn record_sample<S: AsRef<str>>(
@@ -484,6 +525,7 @@ impl Engine {
                 .map_or(0, sampling::SamplingCapture::allocated_bytes)
     }
     pub fn start(&mut self, wall_ns: u64, cpu_ns: u64, memory_bytes: u64) {
+        let cpu_ns = self.cpu(cpu_ns);
         if self.start.is_none() {
             self.start = Some(Snapshot {
                 wall: wall_ns,
@@ -518,6 +560,7 @@ impl Engine {
         if self.finalized.is_some() {
             return;
         }
+        let cpu_ns = self.cpu(cpu_ns);
         self.start(wall_ns, cpu_ns, memory_bytes);
         self.peak = self.peak.max(memory_bytes);
         if self.capture_closed
@@ -648,7 +691,7 @@ impl Engine {
         };
         let end = Snapshot {
             wall: wall_ns,
-            cpu: cpu_ns,
+            cpu: self.cpu(cpu_ns),
             memory: memory_bytes,
         };
         while self.head != Some(position) {
@@ -822,7 +865,7 @@ impl Engine {
         }
         let snapshot = Snapshot {
             wall: wall_ns,
-            cpu: cpu_ns,
+            cpu: self.cpu(cpu_ns),
             memory: memory_bytes,
         };
         self.peak = self.peak.max(memory_bytes);
@@ -880,7 +923,7 @@ impl Engine {
     ) {
         let end = Snapshot {
             wall: wall_ns,
-            cpu: cpu_ns,
+            cpu: self.cpu(cpu_ns),
             memory: memory_bytes,
         };
         if context_id == self.context_id {
@@ -918,6 +961,7 @@ impl Engine {
         memory_bytes: u64,
     ) -> Result<Report, BudgetError> {
         if self.finalized.is_none() {
+            let cpu_ns = self.cpu(cpu_ns);
             self.start(wall_ns, cpu_ns, memory_bytes);
             let end = Snapshot {
                 wall: wall_ns,
@@ -1070,7 +1114,11 @@ impl Engine {
         let mut limitations = BudgetVec::try_with_capacity(5, &self.budget)?;
         for limitation in [
             "Memory deltas are heap observations, not allocation counts; boundary peak may miss transient allocations.",
-            "CPU includes instrumentation overhead; wall clock is monotonic elapsed time.",
+            if self.cpu_enabled {
+                "CPU includes instrumentation overhead; wall clock is monotonic elapsed time."
+            } else {
+                "Thread CPU was not measured because the session disabled it; CPU fields are zero placeholders. Wall clock is monotonic elapsed time."
+            },
             if self.sampling.is_some() {
                 "Wall-safepoint samples are biased by VM service and delayed by long internal calls; coalesced wakes do not create extra stacks or CPU estimates. Independent CPU sampling and exact allocation counts are unavailable. Generator callbacks count resume segments; operation categories measure overlapping enclosing client latency."
             } else {
@@ -1122,6 +1170,9 @@ impl Engine {
             limitations,
             budget: self.budget.clone(),
         };
+        if !self.cpu_enabled {
+            report.mark_thread_cpu_disabled();
+        }
         if report.clock_regressions > 0 {
             report.mark_clock_failure();
         }
@@ -2365,6 +2416,131 @@ mod tests {
         assert_eq!(report.metric_overflows, 2);
         assert_eq!(report.status, "incomplete");
         assert!(report.metric_provenance["exclusive_wall_ns"].starts_with("unavailable:"));
+    }
+    /// Drives every CPU input (start, entry, exit, fiber switch and destruction,
+    /// stop) with values that would be durations or regressions if measured.
+    fn cpu_workload(engine: Engine) -> Report {
+        let mut e = engine;
+        e.start(0, 500, 0);
+        e.enter(1, "outer", 1, 700, 0);
+        e.enter(2, "inner", 2, 100, 0);
+        e.exit(2, 3, 900, 0);
+        e.switch_context(1, 4, 50, 0);
+        e.enter(3, "fiber", 5, 1_000, 0);
+        e.switch_context(0, 6, 20, 0);
+        e.destroy_context(1, 7, 3_000, 0);
+        e.exit_exception(1, 8, 10, 0);
+        e.finish(9, 5, 0)
+    }
+    #[test]
+    fn disabled_thread_cpu_ignores_inputs_and_marks_cpu_metrics_unavailable() {
+        let engine = Engine::with_timeline(8, true).without_thread_cpu();
+        assert!(!engine.thread_cpu_enabled());
+        let report = cpu_workload(engine);
+        assert_eq!(report.clock_regressions, 0);
+        assert_eq!(report.metric_overflows, 0);
+        // Only the destroyed fiber's open frame is incomplete; CPU adds nothing.
+        assert_eq!(report.status, "incomplete");
+        assert!(
+            report
+                .timeline
+                .iter()
+                .all(|event| event.completed != (event.symbol == "fiber"))
+        );
+        assert_eq!(report.thread_cpu_ns, 0);
+        for metrics in report.functions.values() {
+            assert_eq!(metrics.inclusive_cpu_ns, 0);
+            assert_eq!(metrics.exclusive_cpu_ns, 0);
+        }
+        assert_eq!(report.functions["outer"].inclusive_wall_ns, 5);
+        assert_eq!(report.timeline.len(), 3);
+        assert!(report.timeline.iter().all(|event| event.active_cpu_ns == 0));
+        let fields: Vec<_> = report
+            .unavailable_metrics
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                "exclusive_cpu_ns",
+                "inclusive_cpu_ns",
+                "session.thread_cpu_ns",
+                "timeline.active_cpu_ns",
+            ]
+        );
+        for name in CPU_FIELDS {
+            assert_eq!(
+                &*report.metric_provenance[*name],
+                "unavailable:thread-cpu-disabled-by-session-option;numeric-values-are-zero-placeholders"
+            );
+        }
+        assert!(report.metric_provenance["inclusive_wall_ns"].starts_with("measured:"));
+        assert!(!report.hotspots.is_empty());
+        assert!(
+            report
+                .limitations
+                .iter()
+                .any(|text| text.starts_with("Thread CPU was not measured"))
+        );
+    }
+    #[test]
+    fn clock_failure_keeps_the_disabled_thread_cpu_provenance() {
+        let mut engine = Engine::with_timeline(8, true).without_thread_cpu();
+        engine.start(0, 0, 0);
+        engine.enter(1, "f", 20, 0, 0);
+        engine.exit(1, 10, 0, 0);
+        // The wall regression marks a clock failure after the CPU opt-out.
+        let mut report = engine.finish(30, 0, 0);
+        assert!(report.clock_regressions > 0);
+        // A native clock failure reported later must not overwrite it either.
+        report.mark_clock_failure();
+        assert_eq!(report.status, "incomplete");
+        assert!(report.hotspots.is_empty());
+        for name in CPU_FIELDS {
+            assert_eq!(&*report.metric_provenance[*name], THREAD_CPU_DISABLED);
+        }
+        for name in ["inclusive_wall_ns", "session.elapsed_wall_ns"] {
+            assert!(report.metric_provenance[name].starts_with("unavailable:clock-failure"));
+        }
+        assert!(
+            report
+                .unavailable_metrics
+                .iter()
+                .any(|field| field == "inclusive_wall_ns")
+        );
+    }
+    #[test]
+    fn enabled_thread_cpu_keeps_every_cpu_observation() {
+        let engine = Engine::with_timeline(8, true);
+        assert!(engine.thread_cpu_enabled());
+        let report = cpu_workload(engine);
+        // The same inputs are genuine observations here, including regressions.
+        assert!(report.clock_regressions > 0);
+        assert_eq!(report.functions["inner"].inclusive_cpu_ns, 800);
+        assert!(
+            report
+                .unavailable_metrics
+                .iter()
+                .any(|field| field == "inclusive_cpu_ns")
+        );
+        assert!(
+            report.metric_provenance["inclusive_cpu_ns"].starts_with("unavailable:clock-failure")
+        );
+        let mut e = Engine::new(8);
+        e.start(0, 10, 0);
+        e.enter(1, "f", 1, 20, 0);
+        e.exit(1, 2, 50, 0);
+        let report = e.finish(3, 60, 0);
+        assert_eq!(report.thread_cpu_ns, 50);
+        assert_eq!(report.functions["f"].inclusive_cpu_ns, 30);
+        assert!(report.unavailable_metrics.is_empty());
+        assert!(
+            report
+                .limitations
+                .iter()
+                .any(|text| text.starts_with("CPU includes instrumentation overhead"))
+        );
     }
     #[test]
     fn native_clock_and_memory_unavailability_are_idempotent_and_explicit() {

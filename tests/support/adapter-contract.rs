@@ -364,7 +364,7 @@ pub fn profiler_adapter_contract_probe(mode: &str) -> bool {
                 );
             }
             let facts = StopFacts::capture("stopped");
-            let result = decorate(&mut report, &facts);
+            let result = decorate(&mut report, &facts, true);
             OVERSIZED_METADATA.set(false);
             result.unwrap();
             assert_eq!(

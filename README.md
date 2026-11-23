@@ -69,7 +69,9 @@ methods and `getId()`. Omitted handles select within the current fiber context;
 `stop()` requires an active session. Nested measurements overlap and must not be
 added together. Long-running workers should retrieve then reset completed sessions.
 
-Options are `timeline` and `sampling` (both default false), and `max_events` (1–8192, default 512). Storage limits
+Options are `timeline` and `sampling` (both default false), `cpu` (default true), and `max_events` (1–8192, default 512).
+`cpu => false` skips the thread-CPU clock reads at every call boundary while no overlapping
+session measures CPU; that session's report marks its CPU metrics unavailable. Storage limits
 bound graph entries, active frames and timeline records; repeated calls keep
 aggregating. Truncation and unavailable metrics are explicit in the report.
 Graphs cover Zend observer-visible calls. Builtins compiled to VM opcodes (for
