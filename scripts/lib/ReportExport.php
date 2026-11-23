@@ -119,7 +119,8 @@ final class ReportExport
             if (@file_put_contents($temporary, $contents) !== strlen($contents)) {
                 throw new ReportExportError("cannot write: {$temporary}");
             }
-            @chmod($temporary, 0o666 & ~umask());
+            // Keep tempnam()'s 0600: exports carry the report's private program identifiers.
+            @chmod($temporary, 0o600);
             if (!@rename($temporary, $path)) {
                 throw new ReportExportError("cannot replace: {$path}");
             }

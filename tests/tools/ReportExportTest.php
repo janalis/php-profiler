@@ -429,6 +429,9 @@ return [
         $written = runExport(exportReport(), ['--format', 'callgrind', "--output={$output}"]);
         same([0, '', ''], [$written['status'], $written['stdout'], $written['stderr']]);
         same(true, str_starts_with((string) file_get_contents($output), "# callgrind format\n"));
+        // Exports carry the report's private program identifiers, like the extension's 0600 reports.
+        clearstatcache();
+        same(0o600, fileperms($output) & 0o777);
         same(['profile.callgrind'], array_values(array_diff(scandir($directory), ['.', '..'])));
         exportFailed(runExport(exportReport(), [
             '--format',
@@ -451,7 +454,6 @@ return [
             fwrite(STDERR, "ReportExportTest: skipped the real report, no built extension at {$extension}\n");
             return;
         }
-        $directory = temporaryDirectory();
         $code = <<<'PHP'
             function leaf(int $n): int { return $n < 2 ? $n : leaf($n - 1) + leaf($n - 2); }
             $sampling = PhpProfiler\Profiler::isSamplingSupported();

@@ -83,7 +83,8 @@ php -n scripts/export-report.php report.json --format collapsed > stacks.folded
 [Perfetto](https://ui.perfetto.dev) or `chrome://tracing` and needs a report started with
 `['timeline' => true]`, and `collapsed` feeds `flamegraph.pl` or speedscope and needs a
 version 2 report with `['sampling' => true]`. Output goes to standard output without
-`--output`. Unavailable metrics are omitted, never shown as zero; see
+`--output`, which replaces its file whole, with mode 0600 like the reports
+themselves. Unavailable metrics are omitted, never shown as zero; see
 [viewing reports](docs/report-format.md#viewing-reports-in-other-tools) for the mapping.
 
 ## Measurements and limits
