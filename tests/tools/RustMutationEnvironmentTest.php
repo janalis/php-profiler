@@ -35,10 +35,13 @@ function mutationFixture(string $directory): array
     );
     writeFile("{$directory}/metadata.json", $metadata);
     writeFile("{$directory}/discovery.json", $discovery);
+    // A shard lists a strict subset, so a shard count can never pass for the full one.
+    writeFile("{$directory}/shard.json", json_encode([['file' => 'x'], ['file' => 'y']]));
     writeFile("{$directory}/cargo", <<<SH
         #!/bin/sh
         printf '%s\\n' "\$*" >> '{$directory}/arguments'
         printf '%s|%s|%s|%s\\n' "\$1" "\${PROFILER_ADAPTER_CONTRACT_TEST-unset}" "\${PROFILER_C_UNIT_BOUNDARIES-unset}" "\${PROFILER_SAMPLING_UNIT-unset}" >> '{$directory}/calls'
+        case "\$*" in *--shard*) cat '{$directory}/shard.json'; exit 0;; esac
         if [ "\$1" = metadata ]; then cat '{$directory}/metadata.json'; else cat '{$directory}/discovery.json'; fi
 
         SH, 0o755);
@@ -96,11 +99,8 @@ return [
         same(false, str_contains($arguments[1] . $arguments[2], '--shard'));
         same(true, str_ends_with($arguments[3], '--shard 1/3 --sharding round-robin --list --json'));
         $manifest = json_decode((string) file_get_contents("{$directory}/output/latest.json"), true);
-        same(['1/3', $manifest['generated'], 0], [
-            $manifest['shard'],
-            $manifest['shard_generated'],
-            $manifest['exit_code'],
-        ]);
+        same(['1/3', 2, 0], [$manifest['shard'], $manifest['shard_generated'], $manifest['exit_code']]);
+        same(true, $manifest['generated'] > 2);
         foreach (['3/3', '0/0', '1', '-1/2', '1/2/3'] as $invalid) {
             same(true, $run($invalid)['status'] !== 0, $invalid);
         }
