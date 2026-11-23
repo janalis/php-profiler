@@ -4,6 +4,13 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.18] - 2026-11-23
+
+### Commits
+
+- feat: add a cpu session option that skips thread-CPU clock reads (#70)
+- feat: add php_profiler.observer to skip observer registration (#69)
+
 ### Added
 
 - `php_profiler.observer` system INI setting (default `On`). `Off` registers no Zend fcall or fiber observer and no closure-identity cache slot, so a loaded but unused extension avoids the observer dispatch cost. `Profiler::start()` and `Profiler::enable()` then throw `PhpProfiler\ConfigurationException`; automatic capture (`php_profiler.mode=always|trigger`) captures nothing, and the first request that asks for it logs that once per process. The sampling interrupt hook stays registered but can never start.
