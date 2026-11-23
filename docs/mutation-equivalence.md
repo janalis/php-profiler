@@ -655,8 +655,9 @@ mutant.
 `profiler-core`'s `fingerprint()` replaces SipHash with an unseeded multiply-rotate word hash
 and a murmur3 `fmix64` finish. Hashes stay lookup hints that `Index` confirms by full equality.
 `profiler_enter()` now renders each symbol into one buffer kept in the thread's adapter state,
-reset by length instead of zeroing a new 2,064-byte array per call. Neither change touches
-`bridge.c`, `sampling.c`, the FFI signatures or any C-reachable control flow, so no compile
-command, fixture symbol, context or equivalent changed. Only the source and documentation
+reset by length instead of zeroing a new 2,064-byte array per call. No C source and no FFI
+signature changed. The Rust body of `profiler_enter()`, which `bridge.c` calls on every observed
+call, changed how it builds the symbol but passes the engines the same symbol text and takes the
+same failure exits, so no compile command, fixture symbol, context or equivalent changed. Only the source and documentation
 dependency hashes renew. The NTS and ZTS C mutation runs must still classify the same
 equivalents and kill every other mutant.

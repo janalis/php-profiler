@@ -33,11 +33,10 @@ impl Hasher for Fingerprint {
         if !rest.is_empty() {
             let mut word = [0; 8];
             word[..rest.len()].copy_from_slice(rest);
-            // The unused top byte records the tail length, so zero padding
-            // cannot make "a" and "a\0" share a word.
-            word[7] = rest.len() as u8;
             self.add(u64::from_le_bytes(word));
         }
+        // The total length keeps zero padding from making "a" and "a\0" share a state.
+        self.add(bytes.len() as u64);
     }
     fn write_u8(&mut self, value: u8) {
         self.add(u64::from(value));
@@ -137,13 +136,16 @@ mod tests {
             ],
             [
                 12_819_011_691_522_796_655,
-                5_523_637_999_396_069_330,
-                16_902_307_935_051_469_365,
-                11_092_571_681_597_269_604,
+                8_946_213_939_754_866_401,
+                10_821_806_198_865_945_601,
+                2_120_571_520_130_322_530,
                 17_502_858_833_310_787_125,
                 2_180_297_486_836_056_586,
             ]
         );
+        // Zero padding and a tail-length byte cannot stand in for the real length.
+        assert_ne!(fingerprint("abcdefg"), fingerprint("abcdefg\x07"));
+        assert_ne!(fingerprint("a"), fingerprint("a\0\0\0\0\0\0\x01"));
         // Index masks the low bits: 4096 names should land in about 4096 * (1 - 1/e)
         // = 2589 of 4096 buckets when the finish mixes well.
         let mut used = vec![false; 4096];
