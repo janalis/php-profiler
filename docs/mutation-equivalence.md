@@ -810,3 +810,15 @@ by flow conservation, which that bailout's `longjmp` out of `profiler_handle_req
 the worker contract now also calls `frankenphp_handle_request()` without arguments, so its
 argument-count guard's false edge is executed, not inferred. No recorded coordinate moved; no compile command,
 fixture symbol, context or equivalent changed, and only source and dependency hashes renew.
+
+## 2026-11-24 Worker end and shutdown deferrals
+
+`profiler_handle_request()` ends the worker script's request before installing the next call's
+handler and then raises a pending bailout, which the unit contract's new `worker-end` mode
+requires: its request-end transport defers a bailout through the test hook
+`automatic_test_defer_bailout()`. `sample_interrupt()` now chains the previous interrupt handler
+before `profiler_raise_deferred_bailout()`, and its new comment line moves the `sampling.c`
+coordinates below it by one (445→446, 481→482), each keeping its exact text, column, mutator and
+replacement. The Rust request shutdown clears the pending flag through
+`profiler_reset_clocks()`. No compile command, fixture symbol, context or equivalent changed;
+source and dependency hashes renew.

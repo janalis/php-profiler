@@ -108,8 +108,9 @@ impl Report {
         );
     }
     /// A capture without call instrumentation, such as a sampling-only session with Zend's
-    /// fcall observers unregistered, observed no call: its empty call graph and zero
-    /// function metrics are not measurements, and no fiber switch or operation was seen.
+    /// fcall observer unregistered, observed no call: its empty call graph and zero function
+    /// metrics are not measurements, and no call was attributed to a fiber context or an
+    /// operation. Sampled stacks are still placed per fiber context.
     pub fn mark_call_instrumentation_unavailable(&mut self) {
         for capability in [
             "call_instrumentation",

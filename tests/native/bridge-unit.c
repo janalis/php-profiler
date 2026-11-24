@@ -982,6 +982,8 @@ static PHP_FUNCTION(profiler_test_automatic_transports) {
     sapi_module.getenv = original_getenv;
     RETURN_TRUE;
 }
+/* Fault 6 of the worker request end transport: a deferral as a failed report write makes. */
+void automatic_test_defer_bailout(void) { profiler_defer_bailout(); }
 /* A dependency bailout abandons EG(current_execute_data). Check only native
  * status/flags afterwards, then exit this isolated process without resuming
  * Zend. C exit handlers flush both LLVM and gcov counters. */
@@ -1088,6 +1090,22 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         zend_end_try();
         automatic_fault = 0;
         correct &= bailed && !strcmp(automatic_worker_log, "") && profiler_worker_handler == NULL;
+    } else if (mode && strcmp(mode, "worker-end") == 0) {
+        /* A fatal error deferred while the worker script's start ends ends the script there,
+         * before the next request's begin could clear it: the callback never runs. */
+        correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
+                                          MODULE_PERSISTENT) == SUCCESS;
+        sapi_module.name = "frankenphp";
+        profiler_trigger_snapshot();
+        profiler_worker_register();
+        automatic_worker_mode = 0;
+        automatic_fault = 6;
+        volatile bool bailed = false;
+        zend_try { automatic_worker_serve("automatic_test_worker_handler"); }
+        zend_catch { bailed = true; }
+        zend_end_try();
+        automatic_fault = 0;
+        correct &= bailed && !strcmp(automatic_worker_log, "e") && profiler_worker_handler == NULL;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");

@@ -74,6 +74,7 @@ if ($units) {
         'worker',
         'worker-start',
         'worker-materialize',
+        'worker-end',
     ] as $mode) {
         $processes = new ProcessGroups();
         try {
@@ -206,6 +207,14 @@ $sampling = Process::run([
     '-r',
     'echo (int) PhpProfiler\Profiler::isSamplingSupported();',
 ], timeout: 30);
+// Linux always samples here: a failed probe must not skip these checks silently.
+if (
+    $sampling['status'] !== 0
+    || !in_array($sampling['stdout'], ['0', '1'], true)
+    || PHP_OS_FAMILY === 'Linux' && $sampling['stdout'] !== '1'
+) {
+    fail('sampling support probe failed: ' . json_encode($sampling));
+}
 foreach ($sampling['stdout'] === '1' ? ['1', '0'] : [] as $observer) {
     $result = Process::run(
         [

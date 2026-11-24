@@ -599,12 +599,14 @@ static ZEND_NAMED_FUNCTION(profiler_handle_request) {
         profiler_handle_request_original(execute_data, return_value);
         return;
     }
+    /* End the worker script's start, or what ran since the last request, before FrankenPHP
+     * waits for the next one: the wait belongs to no request. A fatal error deferred while it
+     * ended ends the worker script, before the next request's begin could clear it. */
+    profiler_worker_request_end();
+    profiler_raise_pending_bailout();
     ZVAL_INTERNED_STR(argument, profiler_worker_callback_name);
     profiler_worker_call *previous = profiler_worker_handler;
     profiler_worker_handler = &call;
-    /* End the worker script's start, or what ran since the last request, before FrankenPHP
-     * waits for the next one: the wait belongs to no request. */
-    profiler_worker_request_end();
     zend_try { profiler_handle_request_original(execute_data, return_value); }
     zend_catch {
         profiler_worker_restore(argument, &call, previous);
