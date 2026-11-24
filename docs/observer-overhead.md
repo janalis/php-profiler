@@ -132,9 +132,13 @@ CPU/wall observations, source/binary hashes and disassembly checks are retained 
 
 `php_profiler.observer=Off`, a system INI setting read once at module startup,
 removes that floor for processes that never profile: module startup then
-registers no fcall observer, no fiber observers and no closure-identity
-op-array extension slot, so Zend dispatches no call or fiber event to the
-extension. The sampling `zend_interrupt_function` hook stays registered, though
+registers no fcall observer, so Zend dispatches no call event to the extension. It
+still reserves the closure-identity op-array slot and registers the fiber
+observers, which sampling-only sessions need to name closures and place fiber
+stacks; neither adds work to a call, and fiber observers run only on fiber switches.
+Re-timed with both kept (ZTS, 10 alternating rounds, load 4), `Off` ran the call loop
+in 21.99 ms median against 21.91 ms absent and 35.21 ms with `On`.
+The sampling `zend_interrupt_function` hook stays registered, though
 a sampler only runs for a sampling-only session, so VM interrupts otherwise just pass
 through it. Instrumented capture is then unavailable for the whole process:
 `Profiler::enable()` and any `Profiler::start()` that does not sample, or that asks for a

@@ -42,9 +42,18 @@ static zend_always_inline void profiler_mark_used(void) {
 #else
 static zend_always_inline void profiler_mark_used(void) {}
 #endif
+/* Without an fcall end observer to re-raise it (php_profiler.observer=Off), the VM interrupt
+ * reaches profiler_raise_deferred_bailout() once the profiler's internal call returned. */
 static zend_always_inline void profiler_defer_bailout(void) {
     profiler_mark_used();
     profiler_flags.pending_bailout = true;
+    zend_atomic_bool_store_ex(&EG(vm_interrupt), true);
+}
+static zend_always_inline void profiler_raise_pending_bailout(void) {
+    if (profiler_flags.pending_bailout) {
+        profiler_flags.pending_bailout = false;
+        zend_bailout();
+    }
 }
 static int closure_identity_handle = -1;
 /* Never reset: a retained runtime cache must not collide with a later request. */
@@ -181,10 +190,7 @@ static void profiler_end(zend_execute_data *data, zval *retval)
 #endif
 {
     (void)retval;
-    if (profiler_flags.pending_bailout) {
-        profiler_flags.pending_bailout = false;
-        zend_bailout();
-    }
+    profiler_raise_pending_bailout();
     if (!profiler_flags.capture_active)
         return;
     profiler_end_active(data);
@@ -205,7 +211,9 @@ static zend_observer_fcall_handlers profiler_init(zend_execute_data *data) {
     (void)data;
     return (zend_observer_fcall_handlers){profiler_begin, profiler_end};
 }
-int profiler_register(void) {
+/* The closure-identity cache word is not an observer: sampling-only sessions name closures
+ * by it even with php_profiler.observer=Off. */
+int profiler_register_closure_identity(void) {
     /* Reject invalid/capacity-exhausted handle state before changing registration. */
     if (zend_op_array_extension_handles < 0 ||
         zend_op_array_extension_handles >= INT_MAX / (int)sizeof(void *))
@@ -214,6 +222,11 @@ int profiler_register(void) {
     if (handle < 0)
         return FAILURE;
     closure_identity_handle = handle;
+    return SUCCESS;
+}
+int profiler_register(void) {
+    if (profiler_register_closure_identity() != SUCCESS)
+        return FAILURE;
     zend_observer_fcall_register(profiler_init);
     return SUCCESS;
 }
@@ -631,17 +644,18 @@ void profiler_worker_unregister(void) {
  * registered apart from the automatic capture settings, and the adapter reads it once, at
  * module startup: a later system-level change, such as an FPM pool's php_admin_value, can
  * neither remove registered observers nor add missing ones. */
-static bool profiler_observer_value = true;
+static _Atomic bool profiler_observer_value = true;
 static ZEND_INI_MH(profiler_observer_update) {
     (void)entry;
     (void)mh_arg1;
     (void)mh_arg2;
     (void)mh_arg3;
     /* Only startup's value is ever read. Later stages, such as a ZTS Apache vhost's
-     * per-request php_admin_flag, would otherwise write this process-wide value from
-     * several request threads at once. */
+     * per-request php_admin_flag, must not change it; each new ZTS thread still refreshes
+     * its INI caches at the startup stage, hence the atomic store. */
     if (stage == ZEND_INI_STAGE_STARTUP)
-        profiler_observer_value = zend_ini_parse_bool(new_value);
+        atomic_store_explicit(&profiler_observer_value, zend_ini_parse_bool(new_value),
+                              memory_order_relaxed);
     return SUCCESS;
 }
 /* PHP_INI_ENTRY_EX supplies its own trailing comma; {0} is PHP_INI_END()'s terminator. */
@@ -652,7 +666,9 @@ static const zend_ini_entry_def profiler_observer_entries[] = {
 int profiler_observer_config_register(int number) {
     return zend_register_ini_entries(profiler_observer_entries, number);
 }
-int profiler_observer_setting(void) { return profiler_observer_value; }
+int profiler_observer_setting(void) {
+    return atomic_load_explicit(&profiler_observer_value, memory_order_relaxed);
+}
 /* Logged once per process, at the first request that configures automatic capture while
  * observers are Off. */
 void profiler_observer_off_log(void) {
@@ -669,7 +685,9 @@ int profiler_request_startup(int type, int module_number) {
     (void)type;
     (void)module_number;
     profiler_request_begin();
-    if (profiler_flags.pending_bailout)
-        zend_bailout();
+    profiler_raise_pending_bailout();
     return SUCCESS;
 }
+/* The VM interrupt hook calls this outside any Rust frame: a bailout deferred inside a
+ * profiler method is raised once that internal call returned, with or without observers. */
+void profiler_raise_deferred_bailout(void) { profiler_raise_pending_bailout(); }

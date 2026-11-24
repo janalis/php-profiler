@@ -133,15 +133,27 @@ $sampled = <<<'PHP'
         return;
     }
     function leaf(int $n): int { return $n < 2 ? $n : leaf($n - 1) + leaf($n - 2); }
+    function in_fiber(int $n): int { return leaf($n); }
+    $closure = static fn(int $n): int => leaf($n);
     $session = Profiler::start(null, ['sampling' => true]);
-    for ($until = hrtime(true) + 200_000_000; hrtime(true) < $until;) {
+    // Closures and fibers need the closure-identity word and fiber observers Off keeps.
+    for ($until = hrtime(true) + 300_000_000; hrtime(true) < $until;) {
         leaf(12);
+        $closure(12);
+        $fiber = new Fiber(static function (): int { return in_fiber((int) Fiber::suspend()) + in_fiber(12); });
+        $fiber->start();
+        $fiber->resume(12);
     }
     $session->stop();
     $report = $session->getReport();
+    $symbols = $report['sampling']['symbols'];
     echo json_encode([
+        // A closure or fiber the sampler cannot place ends sampling with a failure reason.
+        'termination' => $report['sampling']['termination_reason'],
         'samples' => count($report['sampling']['samples']) > 0,
-        'leaf' => in_array('leaf', $report['sampling']['symbols'], true),
+        'leaf' => in_array('leaf', $symbols, true),
+        'closure' => array_filter($symbols, static fn(string $s): bool => str_starts_with($s, '{')) !== [],
+        'fiber' => in_array('in_fiber', $symbols, true),
         'functions' => count($report['functions']),
         'edges' => count($report['edges']),
         'call_instrumentation' => $report['capabilities']['call_instrumentation'],
@@ -164,8 +176,11 @@ if (array_key_exists('unsupported', $state)) {
 } else {
     check(
         $state === [
+            'termination' => 'stopped',
             'samples' => true,
             'leaf' => true,
+            'closure' => true,
+            'fiber' => true,
             'functions' => 0,
             'edges' => 0,
             'call_instrumentation' => false,

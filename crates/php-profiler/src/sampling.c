@@ -28,6 +28,7 @@
 #define SAMPLE_STACK (256 * 1024)
 _Static_assert(ATOMIC_BOOL_LOCK_FREE == 2, "sampler retirement must be lock-free");
 extern uint64_t profiler_sampling_closure_identity(zend_function *function);
+extern void profiler_raise_deferred_bailout(void);
 typedef struct sample_control {
     pthread_mutex_t mutex;
     pthread_cond_t condition;
@@ -410,6 +411,7 @@ static void sample_interrupt(zend_execute_data *execute_data) {
      * worker creation; false is published only after actual worker join. */
     if (atomic_load_explicit(&control->interested, memory_order_acquire) && control->request_active)
         sample_interrupt_active(execute_data, control);
+    profiler_raise_deferred_bailout();
     /* No Rust-owned object survives this point; previous handler may execute
      * PHP, throw, exit, fork, or longjmp via a fatal bailout. */
     if (previous_interrupt)
