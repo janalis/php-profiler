@@ -491,6 +491,10 @@ return [
             $fiber->start();
             leaf(10);
             $fiber->resume();
+            // Span many 10 ms sampler periods, so a sampled report holds real stacks.
+            for ($until = hrtime(true) + ($sampling ? 200_000_000 : 0); hrtime(true) < $until;) {
+                leaf(12);
+            }
             $session->stop();
             echo $session->getReportJson();
             PHP;
@@ -518,6 +522,18 @@ return [
         $collapsed = runExport($run['stdout'], ['--format', 'collapsed']);
         if (isset($report['sampling'])) {
             same(0, $collapsed['status'], $collapsed['stderr']);
+            $samples = count($report['sampling']['samples']);
+            same(true, $samples > 0, 'a 200 ms sampled loop retains samples');
+            $total = 0;
+            $leafLast = false;
+            foreach (explode("\n", rtrim($collapsed['stdout'], "\n")) as $line) {
+                same(1, preg_match('/^([^;\s][^\n]*) ([1-9]\d*)$/', $line, $match), $line);
+                same(false, in_array('', explode(';', $match[1]), true), $line);
+                $total += (int) $match[2];
+                $leafLast = $leafLast || str_ends_with($match[1], ';leaf');
+            }
+            same($samples, $total, 'each retained sample is counted once');
+            same(true, $leafLast, 'stacks run root first, ending at the sampled leaf');
         } else {
             same(1, $collapsed['status'], $collapsed['stderr']);
         }
