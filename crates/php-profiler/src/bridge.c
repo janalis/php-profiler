@@ -591,19 +591,23 @@ static ZEND_NAMED_FUNCTION(profiler_handle_request) {
     if (wrap) {
         zend_release_fcall_info_cache(&call.fcc);
         wrap = profiler_worker_request();
-        /* Reading _SERVER may have deferred a fatal error. It belongs to the worker script,
-         * which it ends here, before the next request's boundaries could clear it. */
-        profiler_raise_pending_bailout();
     }
+    /* Reading _SERVER may have deferred a fatal error. It belongs to the worker script:
+     * returning raises it, through the fcall end observer or the VM interrupt the deferral
+     * requested, before the next request's boundaries could clear it. No bailout leaves
+     * this frame, so its raw gcov edge counts stay exact. */
+    if (profiler_flags.pending_bailout)
+        return;
     if (!wrap) {
         profiler_handle_request_original(execute_data, return_value);
         return;
     }
     /* End the worker script's start, or what ran since the last request, before FrankenPHP
      * waits for the next one: the wait belongs to no request. A fatal error deferred while it
-     * ended ends the worker script, before the next request's begin could clear it. */
+     * ended is raised the same way, before the next request's begin could clear it. */
     profiler_worker_request_end();
-    profiler_raise_pending_bailout();
+    if (profiler_flags.pending_bailout)
+        return;
     ZVAL_INTERNED_STR(argument, profiler_worker_callback_name);
     profiler_worker_call *previous = profiler_worker_handler;
     profiler_worker_handler = &call;

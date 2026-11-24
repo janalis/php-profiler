@@ -814,7 +814,10 @@ fixture symbol, context or equivalent changed, and only source and dependency ha
 ## 2026-11-24 Worker end and shutdown deferrals
 
 `profiler_handle_request()` ends the worker script's request before installing the next call's
-handler and then raises a pending bailout, which the unit contract's new `worker-end` mode
+handler. A bailout pending after worker detection or that end now makes it return, so the fcall
+end observer or the requested VM interrupt raises it as the call returns: no bailout leaves the
+wrapper's frame, whose raw gcov edges a `longjmp` would otherwise leave inferred. The unit
+contract's new `worker-end` mode
 requires: its request-end transport defers a bailout through the test hook
 `automatic_test_defer_bailout()`. `sample_interrupt()` now chains the previous interrupt handler
 before `profiler_raise_deferred_bailout()`, and its new comment line moves the `sampling.c`
