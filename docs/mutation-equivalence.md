@@ -805,5 +805,8 @@ source and dependency hashes renew.
 `profiler_raise_pending_bailout()` once `profiler_worker_request()` has read `_SERVER`, so a
 fatal error deferred there ends the worker script instead of being cleared by the next
 request's `begin_request()`. The unit contract's `worker-materialize` case now requires that
-bailout, no request boundary and no callback. No recorded coordinate moved; no compile command,
+bailout, no request boundary and no callback. Raw gcov edge counters derive some counts
+by flow conservation, which that bailout's `longjmp` out of `profiler_handle_request()` breaks:
+the worker contract now also calls `frankenphp_handle_request()` without arguments, so its
+argument-count guard's false edge is executed, not inferred. No recorded coordinate moved; no compile command,
 fixture symbol, context or equivalent changed, and only source and dependency hashes renew.

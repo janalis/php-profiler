@@ -628,6 +628,11 @@ static bool automatic_worker_contract(void) {
     correct &= EG(exception) != NULL && automatic_worker_log[0] == 0;
     zend_clear_exception();
     zval_ptr_dtor(&result);
+    /* Without its callback argument, too. */
+    result = automatic_worker_serve_with("automatic_test_worker_handler", 0);
+    correct &= EG(exception) != NULL && automatic_worker_log[0] == 0;
+    zend_clear_exception();
+    zval_ptr_dtor(&result);
     /* A __callStatic callback resolves to a trampoline, which the handler never keeps:
      * PHP's single trampoline slot is free again even when FrankenPHP never calls back. */
     correct &= zend_eval_string("class AutomaticTestMagic { public static function __callStatic("
