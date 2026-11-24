@@ -106,6 +106,8 @@ Normal shutdown can finalize unfinished sessions and attempt local persistence. 
 
 ## Disabled overhead
 
-Loading an observer extension changes Zend execution dispatch even when no session is active. Callback fast paths reduce extension work but cannot remove the engine's observer checks. Benchmark absent, loaded-disabled and enabled separately. A failed negligible-overhead target remains a release blocker; it is not redefined as zero allocations or merely lower overhead than enabled mode.
+Loading an observer extension changes Zend execution dispatch even when no session is active. Callback fast paths reduce extension work but cannot remove the engine's observer checks: an empty observer alone costs measurable time on tiny-call loops, and Zend offers no supported way to register observers after startup (see [observer overhead](observer-overhead.md)). Benchmark absent, loaded-disabled and enabled separately.
+
+The negligible-overhead target is met by `php_profiler.observer=Off`, not by `On`. With `Off`, no fcall or fiber observer is registered: a loaded extension ran a tiny-call loop as fast as an absent one in alternating PHP 8.6 ZTS and NTS runs, and sampling-only sessions remain available. With `On`, which instrumented capture requires, the same loop took about 1.6 to 1.85 times the absent time while no session ran; that cost is documented, not called negligible. Processes that must not pay it use `Off`.
 
 Reference: https://github.com/php/php-src/blob/PHP-8.3/Zend/zend_observer.c

@@ -768,3 +768,12 @@ against the core's `SAMPLE_STACK_LIMIT` and drained wakes against its own `TICK_
 as before, and the generated-identity metadata comes from a constant checked at compile time
 against `GENERATED_LIMIT`. Every value is unchanged and no C source changed, so no compile
 command, fixture symbol, context or equivalent changed. Only the dependency hashes renew.
+
+## 2026-11-24 Sampling-only sessions with observers Off
+
+`Profiler::start()` now admits a sampling session without a timeline when
+`php_profiler.observer` was Off, and the adapter's report decoration marks such reports as
+having no call instrumentation through `profiler-core`'s new
+`Report::mark_call_instrumentation_unavailable()`. Sampled reports gain a
+`call_instrumentation` capability; version 1 output is unchanged. Only Rust changed; no C source, compile command, fixture
+symbol, context or equivalent changed, and only the dependency hashes renew.

@@ -25,6 +25,8 @@ const NOTICE = 'php_profiler.observer is Off, so php_profiler.mode captures noth
 
 const REFUSED = 'Profiling is unavailable: php_profiler.observer was Off at PHP startup';
 
+const START_REFUSED = REFUSED . "; only sessions with ['sampling' => true] and no timeline can start";
+
 $extension = requiredEnvironment('PROFILER_EXTENSION');
 $environment = [...Process::childEnvironment(), 'PHP_INI_SCAN_DIR' => ''];
 $directory = ExceptionFixture::temporaryDirectory('profiler-observer-');
@@ -66,6 +68,7 @@ $refusals = <<<'PHP'
     foreach ([
         'start' => static fn() => Profiler::start(),
         'start options' => static fn() => Profiler::start(null, ['timeline' => true]),
+        'sampled timeline' => static fn() => Profiler::start(null, ['sampling' => true, 'timeline' => true]),
         'enable' => static fn() => Profiler::enable(),
     ] as $name => $call) {
         try {
@@ -96,7 +99,12 @@ foreach (['0', 'Off', 'false', 'no'] as $value) {
     $state = json_decode($result['stdout'], true, flags: JSON_THROW_ON_ERROR);
     check(
         $state === [
-            'refused' => ['start' => REFUSED, 'start options' => REFUSED, 'enable' => REFUSED],
+            'refused' => [
+                'start' => START_REFUSED,
+                'start options' => START_REFUSED,
+                'sampled timeline' => START_REFUSED,
+                'enable' => REFUSED,
+            ],
             'enabled' => false,
             // PHP stores unquoted false keywords as "".
             'ini' => $value === '0' ? '0' : '',
@@ -111,6 +119,67 @@ $info = runPhp(['-d', 'php_profiler.observer=0'], 'phpinfo(INFO_MODULES);');
 check(str_contains($info['stdout'], 'php_profiler.observer => Off => Off'), 'phpinfo Off', $info);
 echo "observer Off refusal checks passed\n";
 
+// The sampler needs no fcall observer, so a sampling-only session still starts with Off.
+// Its report observed no call and says so, instead of presenting an empty call graph.
+$sampled = <<<'PHP'
+    use PhpProfiler\Profiler;
+    if (!Profiler::isSamplingSupported()) {
+        try {
+            Profiler::start(null, ['sampling' => true]);
+            echo json_encode(['unsupported' => 'started']);
+        } catch (PhpProfiler\ConfigurationException $e) {
+            echo json_encode(['unsupported' => $e->getMessage()]);
+        }
+        return;
+    }
+    function leaf(int $n): int { return $n < 2 ? $n : leaf($n - 1) + leaf($n - 2); }
+    $session = Profiler::start(null, ['sampling' => true]);
+    for ($until = hrtime(true) + 200_000_000; hrtime(true) < $until;) {
+        leaf(12);
+    }
+    $session->stop();
+    $report = $session->getReport();
+    echo json_encode([
+        'samples' => count($report['sampling']['samples']) > 0,
+        'leaf' => in_array('leaf', $report['sampling']['symbols'], true),
+        'functions' => count($report['functions']),
+        'edges' => count($report['edges']),
+        'call_instrumentation' => $report['capabilities']['call_instrumentation'],
+        'fiber_contexts' => $report['capabilities']['fiber_contexts'],
+        'calls_unavailable' => in_array('calls', $report['unavailable_metrics'], true),
+        'calls_provenance' => str_starts_with($report['metric_provenance']['calls'], 'unavailable:'),
+        'session_wall' => in_array('session.elapsed_wall_ns', $report['unavailable_metrics'], true),
+    ]);
+    PHP;
+$result = runPhp(['-d', 'php_profiler.observer=0'], $sampled);
+check($result['status'] === 0 && $result['stderr'] === '', 'Off sampling process failed', $result);
+$state = json_decode($result['stdout'], true, flags: JSON_THROW_ON_ERROR);
+if (array_key_exists('unsupported', $state)) {
+    check(
+        $state === ['unsupported' => 'Wall safepoint sampling requires Linux glibc 2.32 or later'],
+        'Off sampling on an unsupported platform',
+        $state,
+    );
+    echo "observer Off sampling refused where sampling is unsupported\n";
+} else {
+    check(
+        $state === [
+            'samples' => true,
+            'leaf' => true,
+            'functions' => 0,
+            'edges' => 0,
+            'call_instrumentation' => false,
+            'fiber_contexts' => false,
+            'calls_unavailable' => true,
+            'calls_provenance' => true,
+            'session_wall' => false,
+        ],
+        'Off sampling-only session',
+        $state,
+    );
+    echo "observer Off sampling-only session checks passed\n";
+}
+
 // The default and an explicit On keep today's behaviour: observers capture.
 $capture = <<<'PHP'
     use PhpProfiler\Profiler;
@@ -121,6 +190,8 @@ $capture = <<<'PHP'
     Profiler::enable();
     echo json_encode([
         'calls' => $session->getReport()['functions']['leaf']['calls'] ?? null,
+        // Unsampled reports are version 1, whose capability set is unchanged.
+        'call_instrumentation' => $session->getReport()['capabilities']['call_instrumentation'] ?? 'absent',
         'enabled' => Profiler::isEnabled(),
         'ini' => ini_get('php_profiler.observer'),
     ]);
@@ -131,6 +202,7 @@ foreach ([[], ['-d', 'php_profiler.observer=1'], ['-d', 'php_profiler.observer=O
     check(
         json_decode($result['stdout'], true, flags: JSON_THROW_ON_ERROR) === [
             'calls' => 1,
+            'call_instrumentation' => 'absent',
             'enabled' => true,
             'ini' => '1',
         ],

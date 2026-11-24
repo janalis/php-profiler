@@ -107,6 +107,21 @@ impl Report {
             "unavailable:clock-failure-or-regression;numeric-values-are-not-valid-measurements",
         );
     }
+    /// A capture without call instrumentation, such as a sampling-only session with Zend's
+    /// fcall observers unregistered, observed no call: its empty call graph and zero
+    /// function metrics are not measurements, and no fiber switch or operation was seen.
+    pub fn mark_call_instrumentation_unavailable(&mut self) {
+        for capability in [
+            "call_instrumentation",
+            "fiber_contexts",
+            "internal_operation_latency",
+        ] {
+            self.capabilities
+                .insert(capability.into(), false)
+                .expect("reserved capability slot");
+        }
+        self.mark_unavailable(CALL_FIELDS, CALLS_NOT_OBSERVED);
+    }
     /// Zend MM can be disabled; zero counters then mean unavailable, not no memory.
     pub fn mark_memory_unavailable(&mut self) {
         self.request_peak_bytes = None;
@@ -163,6 +178,18 @@ const CPU_FIELDS: &[&str] = &[
     "session.thread_cpu_ns",
     "timeline.active_cpu_ns",
 ];
+const CALL_FIELDS: &[&str] = &[
+    "calls",
+    "exceptions",
+    "inclusive_wall_ns",
+    "exclusive_wall_ns",
+    "inclusive_cpu_ns",
+    "exclusive_cpu_ns",
+    "memory_delta_bytes",
+    "hotspots",
+];
+const CALLS_NOT_OBSERVED: &str =
+    "unavailable:no-call-instrumentation;sampling-only-capture;values-are-not-measurements";
 const TIMING_FIELDS: &[&str] = &[
     "inclusive_wall_ns",
     "exclusive_wall_ns",
@@ -1280,7 +1307,9 @@ fn provenance(budget: &Budget) -> Result<BudgetMap<BudgetText>, BudgetError> {
     Ok(map)
 }
 fn capabilities(budget: &Budget, sampled: bool) -> Result<BudgetMap<bool>, BudgetError> {
-    let mut map = BudgetMap::try_with_capacity(6 + usize::from(sampled), budget)?;
+    // One spare slot lets a capture without call instrumentation declare it, while legacy
+    // version 1 reports keep their exact capability set.
+    let mut map = BudgetMap::try_with_capacity(7 + usize::from(sampled), budget)?;
     for (a, b) in [
         ("fiber_contexts", true),
         ("logical_generator_calls", false),
@@ -1293,8 +1322,10 @@ fn capabilities(budget: &Budget, sampled: bool) -> Result<BudgetMap<bool>, Budge
             .expect("six capability names fit six reserved slots");
     }
     if sampled {
-        map.insert("wall_safepoint_sampling".into(), true)
-            .expect("optional capability slot reserved");
+        for name in ["wall_safepoint_sampling", "call_instrumentation"] {
+            map.insert(name.into(), true)
+                .expect("optional capability slots reserved");
+        }
     }
     Ok(map)
 }
@@ -2437,6 +2468,54 @@ mod tests {
         e.destroy_context(1, 7, 3_000, 0);
         e.exit_exception(1, 8, 10, 0);
         e.finish(9, 5, 0)
+    }
+    #[test]
+    fn capture_without_call_instrumentation_marks_call_metrics_unavailable() {
+        // Version 1 keeps its exact capability set; version 2 declares instrumentation.
+        let mut engine = Engine::new(8);
+        engine.start(0, 0, 0);
+        let report = engine.finish(10, 10, 0);
+        assert!(report.capabilities.get("call_instrumentation").is_none());
+        let mut engine = Engine::try_with_sampling(
+            8,
+            false,
+            Budget::new(DEFAULT_BUDGET_BYTES),
+            std::num::NonZeroU64::new(10).expect("nonzero"),
+        )
+        .expect("sampled engine");
+        engine.start(0, 0, 0);
+        let report = engine.finish(10, 10, 0);
+        assert!(report.capabilities["call_instrumentation"]);
+        // A version 1 report still has a slot to declare it absent.
+        let mut engine = Engine::new(8).without_thread_cpu();
+        engine.start(0, 0, 0);
+        let mut report = engine.finish(10, 0, 0);
+        // Every marker at once must fit the reserved slots.
+        report.mark_memory_unavailable();
+        report.mark_clock_failure();
+        report.mark_call_instrumentation_unavailable();
+        for capability in [
+            "call_instrumentation",
+            "fiber_contexts",
+            "internal_operation_latency",
+        ] {
+            assert!(!report.capabilities[capability], "{capability}");
+        }
+        for field in CALL_FIELDS {
+            assert!(
+                report
+                    .unavailable_metrics
+                    .iter()
+                    .any(|name| &**name == *field),
+                "{field}"
+            );
+        }
+        assert_eq!(&*report.metric_provenance["calls"], CALLS_NOT_OBSERVED);
+        // A CPU field the session never measured keeps saying so.
+        assert_eq!(
+            &*report.metric_provenance["inclusive_cpu_ns"],
+            THREAD_CPU_DISABLED
+        );
     }
     #[test]
     fn opting_out_of_thread_cpu_after_start_keeps_measuring_cpu() {

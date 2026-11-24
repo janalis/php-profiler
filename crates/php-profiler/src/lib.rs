@@ -520,6 +520,10 @@ unsafe fn engine_identity(pointer: *const std::ffi::c_char) -> Option<MetadataBy
 }
 fn decorate(report: &mut Report, facts: &StopFacts, thread_cpu: bool) -> Result<(), BudgetError> {
     let budget = report.budget();
+    // Only sampling sessions start without observers, and they observe no call.
+    if !observers_registered() {
+        report.mark_call_instrumentation_unavailable();
+    }
     if let Some(peak) = facts.request_peak {
         report.request_peak_bytes = Some(peak);
     } else {
@@ -1004,7 +1008,6 @@ pub struct PhpProfiler;
 #[php_impl]
 impl PhpProfiler {
     pub fn start(path: Option<&str>, options: Option<&ZendHashTable>) -> PhpResult<SessionHandle> {
-        require_observers()?;
         let mut timeline = false;
         let mut sampled = false;
         let mut cpu = true;
@@ -1044,6 +1047,14 @@ impl PhpProfiler {
             if options.len() != known {
                 return Err(config_error("Unknown profiler option"));
             }
+        }
+        // Without Zend's fcall observers only the sampler observes anything, and it records
+        // no invocation timeline.
+        if !observers_registered() && (!sampled || timeline) {
+            return Err(config_error(
+                "Profiling is unavailable: php_profiler.observer was Off at PHP startup; only \
+                 sessions with ['sampling' => true] and no timeline can start",
+            ));
         }
         Ok(SessionHandle {
             id: Profiler::start_options(validated_path(path)?, timeline, max_events, sampled, cpu)?,

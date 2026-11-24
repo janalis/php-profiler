@@ -39,6 +39,11 @@ include `context_id`, `active_wall_ns`, `active_cpu_ns`, and `suspended_wall_ns`
 Function wall/CPU attribution pauses while its fiber is suspended; session elapsed
 wall time still includes real elapsed suspension. Generator resume observations
 are not guaranteed to equal logical generator invocation counts; check capabilities.
+Sampled (version 2) reports also carry `capabilities.call_instrumentation`. It is `false`
+for a sampling-only session started with `php_profiler.observer=Off`: no call was
+observed, so `functions`, `edges` and `hotspots` are empty, their metrics are listed in
+`unavailable_metrics`, and `fiber_contexts` and `internal_operation_latency` are `false`.
+Only `sampling` and the session totals hold data.
 
 `runtime_metadata` contains execution/build context strings. Its `php_version` is the
 `PHP_VERSION` constant from the headers used to build the extension, not a

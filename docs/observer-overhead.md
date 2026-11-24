@@ -135,9 +135,12 @@ removes that floor for processes that never profile: module startup then
 registers no fcall observer, no fiber observers and no closure-identity
 op-array extension slot, so Zend dispatches no call or fiber event to the
 extension. The sampling `zend_interrupt_function` hook stays registered, though
-no sampler can start, so VM interrupts still pass through it. Capture is then unavailable for the whole process: `Profiler::start()`
-and `Profiler::enable()` throw `ConfigurationException`, and automatic capture
-never starts. In the alternating runs below, a loaded extension with `Off` ran a
+a sampler only runs for a sampling-only session, so VM interrupts otherwise just pass
+through it. Instrumented capture is then unavailable for the whole process:
+`Profiler::enable()` and any `Profiler::start()` that does not sample, or that asks for a
+timeline, throw `ConfigurationException`, and automatic capture never starts. A
+sampling-only session still records wall-safepoint stacks where sampling is supported, with
+no call graph. In the alternating runs below, a loaded extension with `Off` ran a
 call loop as fast as an absent one (22.48 ms against 22.68 ms median), where `On`
 took 36.40 ms.
 

@@ -2,8 +2,8 @@
 
 /**
  * Runtime controls are request-local. Reports contain no argument values.
- * With the system INI setting php_profiler.observer=Off at PHP startup, start() and
- * enable() throw ConfigurationException.
+ * With the system INI setting php_profiler.observer=Off at PHP startup, enable() and
+ * every start() except a sampling-only one without a timeline throw ConfigurationException.
  */
 namespace PhpProfiler;
 
@@ -20,7 +20,8 @@ final class Profiler
      * max_events(int 1..8192, default 512). cpu=false reads no thread-CPU clock and
      * reports CPU metrics as unavailable.
      *
-     * @throws ConfigurationException when php_profiler.observer was Off at PHP startup.
+     * @throws ConfigurationException when php_profiler.observer was Off at PHP startup and
+     *     the session does not sample or asks for a timeline.
      */
     public static function start(?string $path = null, ?array $options = null): Session {}
 

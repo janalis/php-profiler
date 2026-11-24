@@ -4,6 +4,10 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+### Added
+
+- With `php_profiler.observer=Off`, `Profiler::start($path, ['sampling' => true])` starts a sampling-only session where sampling is supported. Sampling needs no fcall observer, so idle processes keep the absent-extension speed and can still be profiled statistically. Its report marks call instrumentation unavailable (`capabilities.call_instrumentation` is `false`); every sampled (version 2) report now carries that capability, and version 1 reports are unchanged.
+
 ### Fixed
 
 - `scripts/export-report.php --format chrome-trace` numbers threads from 1. Perfetto folded thread 0 into the main thread, so the main context and the first fiber shared one track and overlapping slices were moved to an overflow track.
