@@ -4,6 +4,11 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+### Fixed
+
+- `php_profiler.observer` keeps the value read at PHP startup in C as well: a later system-level change, such as a ZTS Apache vhost's `php_admin_flag`, no longer writes it from several request threads at once.
+- `Engine::without_thread_cpu()` has no effect once a capture started, instead of turning its genuine start reading into a CPU clock regression.
+
 ## [0.1.0-alpha.19] - 2026-11-23
 
 ### Commits

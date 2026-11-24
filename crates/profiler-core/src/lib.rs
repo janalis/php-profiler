@@ -466,8 +466,11 @@ impl Engine {
     /// Opt out of thread-CPU measurement before any observation. Every CPU input
     /// is then ignored, so callers may pass a placeholder such as zero, and the
     /// report marks CPU metrics unavailable instead of presenting zeros as measured.
+    /// Once the capture started it has no effect: its start already holds a CPU reading.
     pub fn without_thread_cpu(mut self) -> Self {
-        self.cpu_enabled = false;
+        if self.start.is_none() {
+            self.cpu_enabled = false;
+        }
         self
     }
     /// Whether this capture measures thread CPU and needs genuine CPU observations.
@@ -2431,6 +2434,16 @@ mod tests {
         e.destroy_context(1, 7, 3_000, 0);
         e.exit_exception(1, 8, 10, 0);
         e.finish(9, 5, 0)
+    }
+    #[test]
+    fn opting_out_of_thread_cpu_after_start_keeps_measuring_cpu() {
+        let mut engine = Engine::new(8);
+        engine.start(0, 500, 0);
+        let engine = engine.without_thread_cpu();
+        assert!(engine.thread_cpu_enabled());
+        let report = engine.finish(10, 900, 0);
+        assert_eq!(report.clock_regressions, 0);
+        assert_eq!(report.status, "complete");
     }
     #[test]
     fn disabled_thread_cpu_ignores_inputs_and_marks_cpu_metrics_unavailable() {

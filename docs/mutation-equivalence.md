@@ -737,3 +737,14 @@ clears it and nothing else reads it without observers, so no equivalent is added
 observers On and before any PHP with them Off. The fault object's new
 `__wrap_php_log_err_with_severity` joins both contexts' fixture symbols; no compile command or
 equivalent changed, and only the source and dependency hashes otherwise renew.
+
+## 2026-11-24 php_profiler.observer stores only startup's value
+
+`profiler_observer_update()`, appended after every recorded `bridge.c` coordinate, now stores
+the parsed value only at `ZEND_INI_STAGE_STARTUP`, so later stages no longer write the
+process-wide value from concurrent ZTS request threads. The unit build's automatic transport
+contract alters `php_profiler.observer` at the activate stage and requires
+`profiler_observer_setting()` to keep startup's value. `profiler-core`'s
+`Engine::without_thread_cpu()` ignores a call after `start()`; that crate is not compiled into
+the C fixtures. No compile command, fixture symbol, context or equivalent changed. Only the
+source and dependency hashes renew.
