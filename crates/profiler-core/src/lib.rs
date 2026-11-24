@@ -384,6 +384,9 @@ pub struct Engine {
     finalized: Option<(Snapshot, i64)>,
     sampling: Option<sampling::SamplingCapture>,
 }
+/// The most events one capture records: frames, functions, edges, contexts and timeline
+/// entries are each preallocated up to this. Larger requested limits are clamped to it.
+pub const MAX_EVENTS: usize = 8192;
 impl Engine {
     pub fn new(max_events: usize) -> Self {
         Self::with_timeline(max_events, false)
@@ -401,7 +404,7 @@ impl Engine {
         timeline_enabled: bool,
         budget: Budget,
     ) -> Result<Self, BudgetError> {
-        let limit = max_events.min(8192);
+        let limit = max_events.min(MAX_EVENTS);
         let frames = BudgetVec::try_with_capacity(limit, &budget)?;
         let functions = BudgetVec::try_with_capacity(limit, &budget)?;
         let edges = BudgetVec::try_with_capacity(limit, &budget)?;

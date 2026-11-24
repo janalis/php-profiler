@@ -457,7 +457,7 @@ fn context_identity(state: &mut State, pointer: u64) -> PhpResult<u64> {
     if let Some(id) = state.contexts.get(&pointer) {
         return Ok(*id);
     }
-    if state.contexts.len() >= 8192 {
+    if state.contexts.len() >= storage::IDENTITY_CAPACITY {
         return Err(error("Fiber context capacity reached"));
     }
     let id = state.next_context;
@@ -1194,7 +1194,7 @@ pub unsafe extern "C" fn profiler_enter(
                         return;
                     }
                 }
-                if s.frames.len() >= 8192 {
+                if s.frames.len() >= storage::IDENTITY_CAPACITY {
                     FAILED.set(true);
                     s.enabled = false;
                     update_active(s);

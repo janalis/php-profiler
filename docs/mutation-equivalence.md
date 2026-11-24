@@ -759,3 +759,12 @@ used to raise it, which left Zend's current observed frame on the finished frame
 end of `php -r` code. `scripts/native-bailout-tests.php` runs such code with each observer value
 and requires request startup to fail before it runs. No compile command, fixture symbol, context
 or equivalent changed. Only the source and dependency hashes renew.
+
+## 2026-11-24 Shared limit constants
+
+`profiler-core` exports `MAX_EVENTS` (8192), which the adapter's `IDENTITY_CAPACITY` and its
+context and frame ceilings now use instead of literals. The adapter checks sampled stacks
+against the core's `SAMPLE_STACK_LIMIT` and drained wakes against its own `TICK_LIMIT`, both 64
+as before, and the generated-identity metadata comes from a constant checked at compile time
+against `GENERATED_LIMIT`. Every value is unchanged and no C source changed, so no compile
+command, fixture symbol, context or equivalent changed. Only the dependency hashes renew.

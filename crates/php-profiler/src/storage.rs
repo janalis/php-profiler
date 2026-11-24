@@ -1,11 +1,12 @@
 //! Fallibly preallocated adapter storage. Capture never grows these vectors.
-use profiler_core::{Budget, BudgetError, BudgetVec};
+use profiler_core::{Budget, BudgetError, BudgetVec, MAX_EVENTS};
 use std::{
     fmt,
     ops::{Deref, DerefMut},
 };
 
-pub const IDENTITY_CAPACITY: usize = 8192;
+/// Adapter identities, frames and contexts match the engine's event ceiling.
+pub const IDENTITY_CAPACITY: usize = MAX_EVENTS;
 pub const SESSION_CAPACITY: usize = 16;
 pub const SYMBOL_BYTES: usize = 1024;
 pub const SYMBOL_BUFFER_BYTES: usize = 2064;
