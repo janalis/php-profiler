@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.21] - 2026-11-24
+
+### Commits
+
+- fix: raise a deferred request startup bailout with observers too (#85)
+
 ### Fixed
 
 - With observers on, a fatal error raised while the extension logged during request startup now fails request startup too. It was raised when the first observed call returned; with no call before the end of `php -r` code, PHP then crashed at shutdown.
