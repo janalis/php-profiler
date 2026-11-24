@@ -1362,6 +1362,11 @@ pub extern "C" fn profiler_request_begin() {
 }
 unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
     end_request();
+    // A fatal error deferred while the automatic report was written is dropped, as before
+    // deferrals requested a VM interrupt: raised later, it would end the shutdown hook of an
+    // extension loaded after this one partway through, for instance in user code it calls.
+    // SAFETY: request shutdown runs on the PHP thread; this only clears per-thread flags.
+    unsafe { profiler_reset_clocks() };
     0
 }
 /// FrankenPHP's worker mode serves each HTTP request inside the PHP request that runs the

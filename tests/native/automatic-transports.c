@@ -46,9 +46,13 @@ void automatic_test_worker_begin(void) {
     automatic_worker_note('b');
     real_worker_begin();
 }
+void automatic_test_defer_bailout(void);
 void automatic_test_worker_end(void) {
     automatic_worker_note('e');
     real_worker_end();
+    /* Fault 6: ending the request defers a fatal error, as a failed report write would. */
+    if (automatic_test_fault() == 6)
+        automatic_test_defer_bailout();
 }
 
 void automatic_test_log(const char *message) {

@@ -42,7 +42,8 @@ are not guaranteed to equal logical generator invocation counts; check capabilit
 Sampled (version 2) reports also carry `capabilities.call_instrumentation`. It is `false`
 for a sampling-only session started with `php_profiler.observer=Off`: no call was
 observed, so `functions`, `edges` and `hotspots` are empty, their metrics are listed in
-`unavailable_metrics`, and `fiber_contexts` and `internal_operation_latency` are `false`.
+`unavailable_metrics`, and `fiber_contexts` and `internal_operation_latency` are `false`
+(no call is attributed to a fiber context; sampled stacks still are).
 Only `sampling` and the session totals hold data.
 
 `runtime_metadata` contains execution/build context strings. Its `php_version` is the

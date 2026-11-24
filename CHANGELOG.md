@@ -10,6 +10,8 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ### Fixed
 
+- In FrankenPHP worker mode, a fatal error raised while ending the worker script's capture before the next request now ends the script; the next request's begin cleared it.
+- A fatal error raised while request shutdown writes the automatic report is dropped again, so a VM interrupt can no longer raise it inside a later extension's shutdown hook. The profiler's interrupt hook also runs other extensions' interrupt handlers before raising a deferred fatal error.
 - In FrankenPHP worker mode, a fatal error raised while the extension read `$_SERVER` to recognise a worker now ends the worker script. It was cleared when the next request began, so the script ran on.
 - With `php_profiler.observer=Off`, a sampling-only session no longer stops sampling with a failure when a closure or a fiber is sampled: `Off` now skips only the fcall observer and keeps the closure-identity slot and fiber observers, which add no per-call work. A fatal error raised inside one of its profiler methods now ends the script once the method returns, instead of being lost.
 - A sampling-only report's call metrics keep their "no call instrumentation" provenance when a memory or clock marker also applies.

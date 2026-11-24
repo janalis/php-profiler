@@ -411,11 +411,12 @@ static void sample_interrupt(zend_execute_data *execute_data) {
      * worker creation; false is published only after actual worker join. */
     if (atomic_load_explicit(&control->interested, memory_order_acquire) && control->request_active)
         sample_interrupt_active(execute_data, control);
-    profiler_raise_deferred_bailout();
     /* No Rust-owned object survives this point; previous handler may execute
-     * PHP, throw, exit, fork, or longjmp via a fatal bailout. */
+     * PHP, throw, exit, fork, or longjmp via a fatal bailout. It runs before a
+     * deferred profiler bailout, which would otherwise skip it for this interrupt. */
     if (previous_interrupt)
         previous_interrupt(execute_data);
+    profiler_raise_deferred_bailout();
 }
 uint64_t profiler_sampling_registry_bytes(void) { return sizeof(slots); }
 int profiler_sampling_supported(void) { return 1; }
