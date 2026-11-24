@@ -34,7 +34,7 @@ Every setting is system-only (`PHP_INI_SYSTEM`). `ini_set()` cannot change it.
 | `php_profiler.sampling` | `0` | `0` or `1` | Enable sampling, as the PHP API option. |
 | `php_profiler.cpu` | `1` | `0` or `1` | Read thread-CPU clocks, as the PHP API option. `0` marks CPU metrics unavailable. |
 | `php_profiler.max_events` | `512` | `1` through `8192` | Event limit, as the PHP API option. |
-| `php_profiler.observer` | `On` | `On` or `Off` | Read once at PHP startup. `Off` registers no observer, so no capture starts; the first request whose `mode` is not `off` logs this once per process. |
+| `php_profiler.observer` | `On` | `On` or `Off` | Read once at PHP startup. `Off` registers no observer, so no automatic capture starts (only a sampling-only `Profiler::start()` can); the first request whose `mode` is not `off` logs this once per process. |
 
 PHP's INI parser passes unquoted `Off`, `false`, `no` and `none` as an empty value,
 so they also mean `off` for `mode` and `0` for the boolean settings. `On`, `true`
