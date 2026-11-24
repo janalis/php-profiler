@@ -4,6 +4,17 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.21] - 2026-11-24
+
+### Commits
+
+- fix: raise worker-end fatals, drop shutdown-report fatals, chain interrupts first (#102)
+- fix: end the worker script on a fatal error deferred by worker detection (#99)
+- fix: keep sampling-only sessions working under observer Off (#97)
+- feat: allow sampling-only sessions with php_profiler.observer=Off (#94)
+- fix: number Chrome trace threads from 1 so Perfetto keeps fibers apart (#90)
+- fix: raise a deferred request startup bailout with observers too (#85)
+
 ### Added
 
 - With `php_profiler.observer=Off`, `Profiler::start($path, ['sampling' => true])` starts a sampling-only session where sampling is supported. Sampling needs no fcall observer, so idle processes keep the absent-extension speed and can still be profiled statistically. Its report marks call instrumentation unavailable (`capabilities.call_instrumentation` is `false`); every sampled (version 2) report now carries that capability, and version 1 reports are unchanged.
