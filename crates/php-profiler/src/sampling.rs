@@ -3,7 +3,9 @@ use super::{
     Budget, BudgetError, BudgetText, GeneratedNames, Report, STATE, State, SymbolBuffer,
     profiler_context,
 };
-use profiler_core::{Engine, SampleObservation, SamplingFinish, SamplingTermination};
+use profiler_core::{
+    Engine, SAMPLE_STACK_LIMIT, SampleObservation, SamplingFinish, SamplingTermination,
+};
 use std::{cell::Cell, fmt::Write};
 #[cfg(all(profiler_adapter_contract_tests, not(test)))]
 #[path = "../../../tests/support/sampling-adapter-contract.rs"]
@@ -14,9 +16,21 @@ pub fn register_contracts(module: super::ModuleBuilder) -> super::ModuleBuilder 
 }
 
 pub const PERIOD_NS: u64 = 10_000_000;
-const LIMIT: usize = 64;
+/// `PROFILER_SAMPLE_TICKS` in sampling.h: the most timer wakes one observation drains.
+const TICK_LIMIT: usize = 64;
 // Separate from instrumentation identities: sampling cannot exhaust its maps.
 const GENERATED_LIMIT: usize = 512;
+/// `GENERATED_LIMIT` as reported in the runtime metadata.
+const GENERATED_LIMIT_TEXT: &str = "512";
+const _: () = {
+    let digits = GENERATED_LIMIT_TEXT.as_bytes();
+    let (mut value, mut index) = (0, 0);
+    while index < digits.len() {
+        value = value * 10 + (digits[index] - b'0') as usize;
+        index += 1;
+    }
+    assert!(value == GENERATED_LIMIT);
+};
 thread_local! { static CALLBACK_FAILED: Cell<bool> = const {Cell::new(false)}; }
 
 #[repr(C)]
@@ -311,9 +325,10 @@ impl Tracker {
             "sampling.backend".into(),
             "linux_glibc_2_32_wall_timer_safepoint".into(),
         )?;
-        report
-            .runtime_metadata
-            .insert("sampling.generated_identity_capacity".into(), "512".into())?;
+        report.runtime_metadata.insert(
+            "sampling.generated_identity_capacity".into(),
+            GENERATED_LIMIT_TEXT.into(),
+        )?;
         let deferred = match self.cleanup {
             Some(Cleanup::Deferred) => "true",
             Some(_) => "false",
@@ -478,8 +493,8 @@ unsafe extern "C" fn profiler_sampling_observe(pointer: *const Observation) {
         }
         // SAFETY: native caller supplies this synchronous initialized descriptor.
         let native = unsafe { &*pointer };
-        if native.frame_count > LIMIT
-            || native.tick_count > LIMIT
+        if native.frame_count > SAMPLE_STACK_LIMIT
+            || native.tick_count > TICK_LIMIT
             || (native.frame_count != 0 && native.frames.is_null())
             || (native.tick_count != 0 && native.ticks.is_null())
         {
