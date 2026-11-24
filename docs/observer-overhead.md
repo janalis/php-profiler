@@ -137,9 +137,9 @@ op-array extension slot, so Zend dispatches no call or fiber event to the
 extension. The sampling `zend_interrupt_function` hook stays registered, though
 no sampler can start, so VM interrupts still pass through it. Capture is then unavailable for the whole process: `Profiler::start()`
 and `Profiler::enable()` throw `ConfigurationException`, and automatic capture
-never starts. The setting has not been benchmarked; it changes registration,
-not the observed-call paths measured above, and its cost relative to an absent
-extension remains to be measured.
+never starts. In the alternating runs below, a loaded extension with `Off` ran a
+call loop as fast as an absent one (22.48 ms against 22.68 ms median), where `On`
+took 36.40 ms.
 
 ## Runtime activation API review
 
@@ -268,3 +268,26 @@ depends on hook state while compiling. This audit found no supported late
 invalidation mechanism that restores complete call coverage without changing
 those contracts. Downloaded primary-source snapshots and checksums are retained
 under `target/overhead-api-audit`; no execute-hook replacement was implemented.
+
+## 2026-11-24 alternating timings
+
+macOS arm64 (16 cores), Homebrew PHP 8.6.0 ZTS, release builds, `php -n`, OPcache off.
+Each run times a loop of two million calls to one user function, with admission, stop and
+report retrieval outside the timed region; enabled runs check the capture is complete and
+counts every call. Each comparison ran 10 rounds, alternating the variants and reversing
+their order every other round. The host was not idle: its one-minute load stayed between
+8 and 11, so these are paired comparisons, not absolute figures. NTS was not measured.
+
+| Change | Variant | Median ms | Range ms |
+| --- | --- | --- | --- |
+| #68 symbol lookup, capture running | before | 713.74 | 709.4–721.4 |
+| | after | 649.14 | 642.2–658.9 |
+| #69 `php_profiler.observer`, no capture | extension absent | 22.68 | 22.2–23.0 |
+| | loaded, `On` | 36.40 | 35.6–39.0 |
+| | loaded, `Off` | 22.48 | 22.1–22.9 |
+| #70 `cpu` option, capture running | `cpu => true` | 648.75 | 643.1–653.6 |
+| | `cpu => false` | 212.50 | 210.2–216.2 |
+
+The ranges of each pair do not overlap. #68 cuts this capture's loop time by 9%. `Off`
+removes the loaded extension's dispatch cost on this loop. `cpu => false` cuts it by 67%,
+because each call boundary then reads no thread-CPU clock.
