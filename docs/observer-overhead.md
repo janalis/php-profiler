@@ -276,7 +276,8 @@ Each run times a loop of two million calls to one user function, with admission,
 report retrieval outside the timed region; enabled runs check the capture is complete and
 counts every call. Each comparison ran 10 rounds, alternating the variants and reversing
 their order every other round. The host was not idle: its one-minute load stayed between
-8 and 11, so these are paired comparisons, not absolute figures. NTS was not measured.
+8 and 11, so these are paired comparisons, not absolute figures. The NTS runs below came
+later, with the same method and a load between 9 and 17.
 
 | Change | Variant | Median ms | Range ms |
 | --- | --- | --- | --- |
@@ -291,3 +292,21 @@ their order every other round. The host was not idle: its one-minute load stayed
 The ranges of each pair do not overlap. #68 cuts this capture's loop time by 9%. `Off`
 removes the loaded extension's dispatch cost on this loop. `cpu => false` cuts it by 67%,
 because each call boundary then reads no thread-CPU clock.
+
+The same comparisons on Homebrew PHP 8.6.0 NTS, with extensions built against it, are
+noisier. Each round runs every variant once, so the last column gives the median of the
+per-round ratios.
+
+| Change | Variant | Median ms | Range ms | Paired median ratio |
+| --- | --- | --- | --- | --- |
+| #68 symbol lookup, capture running | before | 711.44 | 697.2–777.5 | |
+| | after | 652.83 | 630.2–703.5 | 0.918 of before |
+| #69 `php_profiler.observer`, no capture | extension absent | 24.80 | 21.8–27.5 | |
+| | loaded, `On` | 45.94 | 41.7–63.4 | 1.851 of absent |
+| | loaded, `Off` | 22.53 | 21.8–25.1 | 0.963 of absent |
+| #70 `cpu` option, capture running | `cpu => true` | 646.00 | 632.4–665.3 | |
+| | `cpu => false` | 202.50 | 197.8–219.5 | 0.314 of `true` |
+
+#68's ranges overlap here, but the after build was faster in all ten rounds (ratios 0.860 to
+0.952). `Off` again matches an absent extension, and `cpu => false` again removes about
+two thirds of the capture's loop time.
