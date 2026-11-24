@@ -29,6 +29,7 @@ const _: () = assert!(METADATA_DISPLAY_BYTES <= SYMBOL_BUFFER_BYTES);
 
 unsafe extern "C" {
     fn profiler_register() -> i32;
+    fn profiler_register_closure_identity() -> i32;
     fn profiler_set_active(active: i32);
     fn profiler_set_context_tracking(tracking: i32);
     fn profiler_set_thread_cpu(measured: i32);
@@ -206,8 +207,8 @@ struct State {
     /// Reused per call: a fresh buffer would zero its 2 KiB array every time.
     symbol: SymbolBuffer,
 }
-/// Whether module startup registered the Zend observers; `php_profiler.observer=Off` skips
-/// them, and every capture entry point then refuses to start.
+/// Whether module startup registered Zend's fcall observer; with `php_profiler.observer=Off`
+/// only sampling-only sessions can start.
 static OBSERVERS: AtomicBool = AtomicBool::new(false);
 fn observers_registered() -> bool {
     OBSERVERS.load(Ordering::Relaxed)
@@ -520,10 +521,6 @@ unsafe fn engine_identity(pointer: *const std::ffi::c_char) -> Option<MetadataBy
 }
 fn decorate(report: &mut Report, facts: &StopFacts, thread_cpu: bool) -> Result<(), BudgetError> {
     let budget = report.budget();
-    // Only sampling sessions start without observers, and they observe no call.
-    if !observers_registered() {
-        report.mark_call_instrumentation_unavailable();
-    }
     if let Some(peak) = facts.request_peak {
         report.request_peak_bytes = Some(peak);
     } else {
@@ -571,6 +568,12 @@ fn decorate(report: &mut Report, facts: &StopFacts, thread_cpu: bool) -> Result<
             }
         };
         report.runtime_metadata.insert((*key).into(), value)?;
+    }
+    // Only sampling-only sessions start without the fcall observer, and they observe no
+    // call. Marked last, so a memory or clock marker cannot claim these never-measured
+    // metrics were measured and then lost.
+    if !observers_registered() {
+        report.mark_call_instrumentation_unavailable();
     }
     Ok(())
 }
@@ -1331,16 +1334,20 @@ unsafe extern "C" fn startup(module_type: i32, module_number: i32) -> i32 {
     OBSERVERS.store(false, Ordering::Relaxed);
     // SAFETY: permanent module startup is the required registration phase.
     unsafe {
-        // Off skips the fcall observer, the closure-identity cache word it alone reads, and
-        // the fiber observers, which act only for a capture or tracked context: neither can
-        // exist when every capture entry point refuses to start.
-        if observers {
-            if profiler_register() != 0 {
-                return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
-            }
-            profiler_register_fibers();
-            OBSERVERS.store(true, Ordering::Relaxed);
+        // Off skips only the fcall observer, whose dispatch every call pays. Sampling-only
+        // sessions still start with Off and need the closure-identity cache word to name
+        // closures and the fiber observers to know each sampled fiber's context; neither
+        // adds per-call work.
+        let registered = if observers {
+            profiler_register()
+        } else {
+            profiler_register_closure_identity()
+        };
+        if registered != 0 {
+            return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
         }
+        profiler_register_fibers();
+        OBSERVERS.store(observers, Ordering::Relaxed);
         if sampling::profiler_sampling_register() == 0 {
             return ext_php_rs::ffi::ZEND_RESULT_CODE_FAILURE;
         }

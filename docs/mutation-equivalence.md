@@ -777,3 +777,24 @@ having no call instrumentation through `profiler-core`'s new
 `Report::mark_call_instrumentation_unavailable()`. Sampled reports gain a
 `call_instrumentation` capability; version 1 output is unchanged. Only Rust changed; no C source, compile command, fixture
 symbol, context or equivalent changed, and only the dependency hashes renew.
+
+## 2026-11-24 Off keeps the closure slot and fiber observers; deferred bailouts interrupt
+
+`profiler_register()` is split: `profiler_register_closure_identity()` reserves the
+closure-identity op-array slot, and module startup calls it alone when
+`php_profiler.observer` is Off, then registers the fiber observers in both modes. The clear
+and bailout that `profiler_end()` ran inline move into the always-inline
+`profiler_raise_pending_bailout()`, shared with `profiler_request_startup()` and the new
+`profiler_raise_deferred_bailout()`, which `sample_interrupt()` calls before chaining. Each
+deferral also sets `EG(vm_interrupt)`, so a bailout deferred inside a profiler method is raised
+once the method returned even without an fcall end observer.
+
+These edits move recorded coordinates. Every recorded line keeps its exact text, column,
+mutator and replacement, and was remapped by unique line text: `bridge.c` 46→48, 54→63,
+94→103, 95→104, 151→160, 284→297, 300→313 and 324→337; `sampling.c` lines shift by one or two.
+The pending-bailout clear recorded at `bridge.c` 185:40, an
+[actual noncanonical Boolean store](#actual-noncanonical-boolean-stores), is now line 54:40
+inside the inlined helper. It stores the same false byte immediately before the same
+`zend_bailout()`, and every reader, including the helper's own check, still masks bit 0, so the
+proof holds for each inlined caller. No compile command, fixture symbol or context changed;
+source and dependency hashes renew.

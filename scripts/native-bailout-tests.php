@@ -195,6 +195,45 @@ foreach (['1', '0'] as $observer) {
     }
     echo "observer={$observer}: request startup log bailout fails request startup\n";
 }
+// A bailout deferred inside a profiler method is raised once the method returned: by the
+// fcall end observer with observers, by the VM interrupt the deferral requests without them,
+// where only a sampling-only session can start.
+$sampling = Process::run([
+    $php,
+    '-n',
+    '-d',
+    'extension=' . $extension,
+    '-r',
+    'echo (int) PhpProfiler\Profiler::isSamplingSupported();',
+], timeout: 30);
+foreach ($sampling['stdout'] === '1' ? ['1', '0'] : [] as $observer) {
+    $result = Process::run(
+        [
+            $php,
+            '-n',
+            '-d',
+            'extension=' . $extension,
+            '-d',
+            "php_profiler.observer={$observer}",
+            '-r',
+            '$s = PhpProfiler\Profiler::start(null, ["sampling" => true]);'
+                . ' for ($u = hrtime(true) + 50_000_000; hrtime(true) < $u;) { str_repeat("x", 2); }'
+                . ' $s->stop(); echo "BEFORE_REPORT\n"; $s->getReport(); echo "AFTER_REPORT\n";',
+        ],
+        $faultEnvironment(['PROFILER_TEST_BAILOUT' => 'decode']),
+        timeout: 30,
+    );
+    $output = $checked($result, 'native bailout boundary');
+    if (
+        $result['status'] !== 255
+        || !str_contains($output, 'INJECTED_NATIVE_BAILOUT')
+        || !str_contains($output, 'BEFORE_REPORT')
+        || str_contains($output, 'AFTER_REPORT')
+    ) {
+        fail("observer={$observer}: sampled report bailout lost: " . json_encode($result['status']) . ": {$output}");
+    }
+    echo "observer={$observer}: sampled report bailout ends the script once getReport() returns\n";
+}
 foreach (['decode', 'string', 'allowed', 'resolve'] as $mode) {
     $outerReport = "{$reports}/{$mode}.json";
     $result = Process::run(

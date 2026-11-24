@@ -28,7 +28,7 @@ Load the extension during process startup. Runtime `dl()` loading is unsupported
 because Zend observers must register at startup.
 
 Set `php_profiler.observer=Off` (system INI only; default `On`) to load the extension
-without its Zend fcall and fiber observers, so a loaded but unused extension avoids the
+without its Zend fcall observer, so a loaded but unused extension avoids the
 observer dispatch cost described in [observer overhead](docs/observer-overhead.md).
 The value is read once, at PHP startup, and `ini_set()` is refused. An FPM pool's
 `php_admin_value` cannot change it afterwards, although `ini_get()` and phpinfo then show
@@ -37,8 +37,7 @@ the pool's value rather than the startup one. With `Off`, `Profiler::enable()` a
 `Profiler::start($path, ['sampling' => true])` still works where sampling does (Linux), as
 sampling needs no fcall observer; a timeline cannot be requested with it. Its report has
 sampled stacks but no call graph: `capabilities.call_instrumentation` is `false` and
-`unavailable_metrics` lists the function metrics, and closures in sampled stacks are not told
-apart. Automatic capture
+`unavailable_metrics` lists the function metrics. Automatic capture
 (below) never starts: the first request whose `php_profiler.mode` is not `off` logs one line
 per process saying so, and requests run without a capture, report or `X-Php-Profiler-Id` header.
 

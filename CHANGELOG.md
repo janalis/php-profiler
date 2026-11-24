@@ -10,6 +10,9 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ### Fixed
 
+- With `php_profiler.observer=Off`, a sampling-only session no longer stops sampling with a failure when a closure or a fiber is sampled: `Off` now skips only the fcall observer and keeps the closure-identity slot and fiber observers, which add no per-call work. A fatal error raised inside one of its profiler methods now ends the script once the method returns, instead of being lost.
+- A sampling-only report's call metrics keep their "no call instrumentation" provenance when a memory or clock marker also applies.
+- `scripts/export-report.php --format chrome-trace` rejects a `context_id` of `PHP_INT_MAX`, which left no thread id.
 - `scripts/export-report.php --format chrome-trace` numbers threads from 1. Perfetto folded thread 0 into the main thread, so the main context and the first fiber shared one track and overlapping slices were moved to an overflow track.
 - With observers on, a fatal error raised while the extension logged during request startup now fails request startup too. It was raised when the first observed call returned; with no call before the end of `php -r` code, PHP then crashed at shutdown.
 

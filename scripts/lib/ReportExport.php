@@ -296,6 +296,9 @@ final class ReportExport
                 throw new ReportExportError("{$where} has a malformed symbol, completed or outcome");
             }
             $context = self::integer($record['context_id'], "{$where}.context_id");
+            if ($context === PHP_INT_MAX) {
+                throw new ReportExportError("{$where}.context_id leaves no thread id after it");
+            }
             $contexts[$context] = true;
             $parent = $record['parent_frame_id'];
             $arguments = [
