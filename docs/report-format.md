@@ -142,8 +142,8 @@ with status 1 and a message; usage errors exit with status 2.
 - **`chrome-trace`** (Trace Event JSON, for Perfetto and `chrome://tracing`). Each
   `timeline` record is a complete (`"X"`) event: `ts` is `start_ns` minus the earliest
   record start, `dur` is `end_ns - start_ns`, both in microseconds with nanosecond
-  decimals. `pid` is 1 and `tid` is the record's `context_id`, so each fiber context
-  has its own track. `args` keep the frame and parent IDs, `completed`, `outcome`,
+  decimals. `pid` is 1 and `tid` is the record's `context_id` plus 1, so each fiber
+  context has its own track; Perfetto would fold a thread 0 into the main thread. `args` keep the frame and parent IDs, `completed`, `outcome`,
   `active_wall_ns`, `active_cpu_ns` and `suspended_wall_ns`. `otherData` holds the
   report status, the timestamp origin, `dropped_timeline_events`, unavailable metrics
   and truncation notes. A report without a timeline (`timeline_enabled` false) is

@@ -236,6 +236,8 @@ final class ReportExport
     /**
      * Chrome Trace Event JSON from the timeline: one complete ("X") event per record, in
      * microseconds from the earliest record start, with the fiber context as the thread.
+     * Context N is thread N + 1: Perfetto folds thread 0 into the process's main thread
+     * (tid 1 here), which would stack the main context and the first fiber on one track.
      *
      * @param array<string, mixed> $report
      */
@@ -315,7 +317,7 @@ final class ReportExport
                 'ts' => self::microseconds($start - $origin),
                 'dur' => self::microseconds($end - $start),
                 'pid' => 1,
-                'tid' => $context,
+                'tid' => $context + 1,
                 'args' => $arguments,
                 // Sort keys, not output.
                 '_start' => $start,
@@ -338,7 +340,7 @@ final class ReportExport
             'name' => 'process_name',
             'ph' => 'M',
             'pid' => 1,
-            'tid' => 0,
+            'tid' => 1,
             'args' => ['name' => 'php-profiler'],
         ]];
         foreach (array_keys($contexts) as $context) {
@@ -346,7 +348,7 @@ final class ReportExport
                 'name' => 'thread_name',
                 'ph' => 'M',
                 'pid' => 1,
-                'tid' => $context,
+                'tid' => $context + 1,
                 'args' => ['name' => "context {$context}"],
             ];
         }

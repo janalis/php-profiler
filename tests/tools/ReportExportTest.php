@@ -301,13 +301,13 @@ return [
         );
         $expected = implode(",\n", [
             '{"traceEvents":[',
-            '{"name":"process_name","ph":"M","pid":1,"tid":0,"args":{"name":"php-profiler"}}',
-            '{"name":"thread_name","ph":"M","pid":1,"tid":0,"args":{"name":"context 0"}}',
-            '{"name":"thread_name","ph":"M","pid":1,"tid":2,"args":{"name":"context 2"}}',
-            '{"name":"main","cat":"php","ph":"X","ts":0,"dur":1,"pid":1,"tid":0,' . $args(1, null, 1000),
-            '{"name":"work","cat":"php","ph":"X","ts":0.1,"dur":0.3,"pid":1,"tid":0,' . $args(2, 1, 300),
-            '{"name":"work","cat":"php","ph":"X","ts":0.5,"dur":0.3,"pid":1,"tid":0,' . $args(3, 1, 300),
-            '{"name":"{closure#1}","cat":"php","ph":"X","ts":0.6,"dur":0.05,"pid":1,"tid":2,'
+            '{"name":"process_name","ph":"M","pid":1,"tid":1,"args":{"name":"php-profiler"}}',
+            '{"name":"thread_name","ph":"M","pid":1,"tid":1,"args":{"name":"context 0"}}',
+            '{"name":"thread_name","ph":"M","pid":1,"tid":3,"args":{"name":"context 2"}}',
+            '{"name":"main","cat":"php","ph":"X","ts":0,"dur":1,"pid":1,"tid":1,' . $args(1, null, 1000),
+            '{"name":"work","cat":"php","ph":"X","ts":0.1,"dur":0.3,"pid":1,"tid":1,' . $args(2, 1, 300),
+            '{"name":"work","cat":"php","ph":"X","ts":0.5,"dur":0.3,"pid":1,"tid":1,' . $args(3, 1, 300),
+            '{"name":"{closure#1}","cat":"php","ph":"X","ts":0.6,"dur":0.05,"pid":1,"tid":3,'
                 . $args(4, null, 50, 2, false),
         ]);
         $expected = str_replace("[,\n", "[\n", $expected);
