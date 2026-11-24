@@ -4,6 +4,13 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.21] - 2026-11-24
+
+### Commits
+
+- fix: number Chrome trace threads from 1 so Perfetto keeps fibers apart (#90)
+- fix: raise a deferred request startup bailout with observers too (#85)
+
 ### Fixed
 
 - `scripts/export-report.php --format chrome-trace` numbers threads from 1. Perfetto folded thread 0 into the main thread, so the main context and the first fiber shared one track and overlapping slices were moved to an overflow track.
