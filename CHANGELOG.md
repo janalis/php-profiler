@@ -10,6 +10,7 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ### Fixed
 
+- In FrankenPHP worker mode, a fatal error raised while the extension read `$_SERVER` to recognise a worker now ends the worker script. It was cleared when the next request began, so the script ran on.
 - With `php_profiler.observer=Off`, a sampling-only session no longer stops sampling with a failure when a closure or a fiber is sampled: `Off` now skips only the fcall observer and keeps the closure-identity slot and fiber observers, which add no per-call work. A fatal error raised inside one of its profiler methods now ends the script once the method returns, instead of being lost.
 - A sampling-only report's call metrics keep their "no call instrumentation" provenance when a memory or clock marker also applies.
 - `scripts/export-report.php --format chrome-trace` rejects a `context_id` of `PHP_INT_MAX`, which left no thread id.

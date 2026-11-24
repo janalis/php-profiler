@@ -591,6 +591,9 @@ static ZEND_NAMED_FUNCTION(profiler_handle_request) {
     if (wrap) {
         zend_release_fcall_info_cache(&call.fcc);
         wrap = profiler_worker_request();
+        /* Reading _SERVER may have deferred a fatal error. It belongs to the worker script,
+         * which it ends here, before the next request's boundaries could clear it. */
+        profiler_raise_pending_bailout();
     }
     if (!wrap) {
         profiler_handle_request_original(execute_data, return_value);
