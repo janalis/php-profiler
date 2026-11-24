@@ -659,15 +659,17 @@ void profiler_observer_off_log(void) {
     profiler_log("php_profiler: php_profiler.observer is Off, so php_profiler.mode captures "
                  "nothing in this process");
 }
-int profiler_request_begin(void);
-/* RINIT. A bailout deferred while request startup's Rust code ran is otherwise re-raised by
- * the fcall end observer; with php_profiler.observer=Off none is registered, so it is raised
- * here, after Rust returned, and fails the request's startup. The next request's
- * begin_request() clears the flag, and nothing else reads it without observers. */
+void profiler_request_begin(void);
+/* RINIT. A bailout deferred while request startup's Rust code ran is raised here, after Rust
+ * returned, and fails the request's startup. Left to the first fcall end observer, it would
+ * never come with php_profiler.observer=Off, and with observers it would leave Zend's current
+ * observed frame on a finished frame, which zend_observer_fcall_end_all() revisits at
+ * shutdown. The flag stays set: nothing reads it before the next begin_request() clears it. */
 int profiler_request_startup(int type, int module_number) {
     (void)type;
     (void)module_number;
-    if (!profiler_request_begin() && profiler_flags.pending_bailout)
+    profiler_request_begin();
+    if (profiler_flags.pending_bailout)
         zend_bailout();
     return SUCCESS;
 }
