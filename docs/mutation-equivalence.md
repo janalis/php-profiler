@@ -748,3 +748,14 @@ contract alters `php_profiler.observer` at the activate stage and requires
 `Engine::without_thread_cpu()` ignores a call after `start()`; that crate is not compiled into
 the C fixtures. No compile command, fixture symbol, context or equivalent changed. Only the
 source and dependency hashes renew.
+
+## 2026-11-24 Request startup raises every deferred bailout
+
+`profiler_request_startup()`, appended after every recorded `bridge.c` coordinate, now raises a
+bailout deferred during request startup whether or not observers are registered, and
+`profiler_request_begin()` no longer reports them. With observers, the first fcall end observer
+used to raise it, which left Zend's current observed frame on the finished frame;
+`zend_observer_fcall_end_all()` revisited it at shutdown and crashed when no call preceded the
+end of `php -r` code. `scripts/native-bailout-tests.php` runs such code with each observer value
+and requires request startup to fail before it runs. No compile command, fixture symbol, context
+or equivalent changed. Only the source and dependency hashes renew.

@@ -1336,13 +1336,11 @@ unsafe extern "C" fn startup(module_type: i32, module_number: i32) -> i32 {
     };
     0
 }
-/// Request startup's Rust half, called by the bridge's `profiler_request_startup()`.
-/// Returns whether module startup registered the observers: without them no fcall end
-/// observer re-raises a bailout deferred here, so the bridge raises it once this returns.
+/// Request startup's Rust half, called by the bridge's `profiler_request_startup()`, which
+/// raises a bailout deferred here once this returns.
 #[unsafe(no_mangle)]
-pub extern "C" fn profiler_request_begin() -> i32 {
+pub extern "C" fn profiler_request_begin() {
     begin_request();
-    observers_registered() as i32
 }
 unsafe extern "C" fn request_shutdown(_: i32, _: i32) -> i32 {
     end_request();
