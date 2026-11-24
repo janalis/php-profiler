@@ -4,6 +4,12 @@ All notable changes are documented here using Semantic Versioning. See the READM
 
 ## [Unreleased]
 
+## [0.1.0-alpha.20] - 2026-11-24
+
+### Commits
+
+- fix: keep php_profiler.observer's startup value and ignore a late CPU opt-out (#83)
+
 ### Fixed
 
 - `php_profiler.observer` keeps the value read at PHP startup in C as well: a later system-level change, such as a ZTS Apache vhost's `php_admin_flag`, no longer writes it from several request threads at once.
