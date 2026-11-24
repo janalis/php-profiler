@@ -81,6 +81,7 @@ void automatic_test_worker_end(void);
 #undef profiler_worker_request_begin
 #undef profiler_worker_request_end
 void profiler_worker_request_begin(void);
+int profiler_observer_setting(void);
 #undef profiler_register
 #undef profiler_fiber_cleanup
 #undef profiler_fiber_destroy
@@ -758,6 +759,15 @@ static bool automatic_worker_contract(void) {
 }
 static PHP_FUNCTION(profiler_test_automatic_transports) {
     (void)execute_data;
+    /* php_profiler.observer keeps startup's value: a later system-level change updates
+     * the INI entry, not the value module startup read. */
+    zend_string *observer_name = zend_string_init(ZEND_STRL("php_profiler.observer"), 0);
+    AUTOMATIC_ASSERT(profiler_observer_setting() == 1);
+    AUTOMATIC_ASSERT(zend_alter_ini_entry_chars(observer_name, "0", 1, PHP_INI_SYSTEM,
+                                                PHP_INI_STAGE_ACTIVATE) == SUCCESS);
+    AUTOMATIC_ASSERT(profiler_observer_setting() == 1);
+    AUTOMATIC_ASSERT(zend_restore_ini_entry(observer_name, PHP_INI_STAGE_DEACTIVATE) == SUCCESS);
+    zend_string_release(observer_name);
     zend_module_entry *module = zend_hash_str_find_ptr(&module_registry, ZEND_STRL("php_profiler"));
     AUTOMATIC_ASSERT(module != NULL);
     int previous_type = module->type;

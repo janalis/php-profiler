@@ -637,8 +637,11 @@ static ZEND_INI_MH(profiler_observer_update) {
     (void)mh_arg1;
     (void)mh_arg2;
     (void)mh_arg3;
-    (void)stage;
-    profiler_observer_value = zend_ini_parse_bool(new_value);
+    /* Only startup's value is ever read. Later stages, such as a ZTS Apache vhost's
+     * per-request php_admin_flag, would otherwise write this process-wide value from
+     * several request threads at once. */
+    if (stage == ZEND_INI_STAGE_STARTUP)
+        profiler_observer_value = zend_ini_parse_bool(new_value);
     return SUCCESS;
 }
 /* PHP_INI_ENTRY_EX supplies its own trailing comma; {0} is PHP_INI_END()'s terminator. */
