@@ -1065,8 +1065,8 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         correct &= bailed && !strcmp(automatic_worker_log, "e") && profiler_worker_handler == NULL;
     } else if (mode && strcmp(mode, "worker-materialize") == 0) {
         /* With FrankenPHP's getenv hook silent, an unreadable _SERVER still counts as a
-         * worker's: the request is served as one. Its deferred bailout is consumed by the
-         * request boundaries that follow. */
+         * worker's. Reading it deferred a fatal error, which ends the worker script there:
+         * no request boundary runs and the callback is not called. */
         correct = zend_register_functions(NULL, automatic_test_worker_functions, NULL,
                                           MODULE_PERSISTENT) == SUCCESS;
         sapi_module.name = "frankenphp";
@@ -1077,10 +1077,12 @@ static PHP_FUNCTION(profiler_test_automatic_bailout) {
         automatic_worker_environment = NULL;
         automatic_worker_mode = 0;
         automatic_fault = 4;
-        zval result = automatic_worker_serve("automatic_test_worker_handler");
+        volatile bool bailed = false;
+        zend_try { automatic_worker_serve("automatic_test_worker_handler"); }
+        zend_catch { bailed = true; }
+        zend_end_try();
         automatic_fault = 0;
-        correct &= Z_TYPE(result) == IS_LONG && Z_LVAL(result) == 42;
-        correct &= !strcmp(automatic_worker_log, "ebhe");
+        correct &= bailed && !strcmp(automatic_worker_log, "") && profiler_worker_handler == NULL;
     } else if (mode && strcmp(mode, "header") == 0) {
         automatic_fault = 2;
         int status = profiler_auto_header("X-Php-Profiler-Id: contract");

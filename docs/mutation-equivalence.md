@@ -798,3 +798,12 @@ inside the inlined helper. It stores the same false byte immediately before the 
 `zend_bailout()`, and every reader, including the helper's own check, still masks bit 0, so the
 proof holds for each inlined caller. No compile command, fixture symbol or context changed;
 source and dependency hashes renew.
+
+## 2026-11-24 Worker detection raises its deferred bailout
+
+`profiler_handle_request()`, after every recorded `bridge.c` coordinate, calls
+`profiler_raise_pending_bailout()` once `profiler_worker_request()` has read `_SERVER`, so a
+fatal error deferred there ends the worker script instead of being cleared by the next
+request's `begin_request()`. The unit contract's `worker-materialize` case now requires that
+bailout, no request boundary and no callback. No recorded coordinate moved; no compile command,
+fixture symbol, context or equivalent changed, and only source and dependency hashes renew.
